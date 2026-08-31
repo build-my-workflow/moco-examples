@@ -1,0 +1,269 @@
+wfspec_name: child-workflow-demo
+wfspec_version: 1.0.0
+
+# A worked composition pipeline, as opposed to the reference matrix in
+# child-workflow-modes-demo. A coordinator fans work out to child workflows:
+# an inline greeter, a set of sync children driven from an iteration, and an
+# async worker whose result is collected with wait_for.
+#
+# Read child-workflow-modes-demo first for what each child_mode means; this file
+# shows them working together on a realistic shape.
+#
+#   inline child   -> greeting
+#   sync children  -> per-item processing, run from an iteration
+#   async child    -> background work, joined via emit_event + wait_for
+
+tags: [moco-demo, level-4-composition]
+
+description: |
+  Demonstrates parent-child workflow composition with inline child workflow
+  definitions and multiple execution modes.
+
+# ================================================================================
+# CONTEXT: INLINE CHILD WORKFLOW DEFINITIONS
+# ================================================================================
+
+# Child workflows can be defined as YAML content stored in context variables.
+# This allows for dynamic workflow composition without requiring separate files.
+
+context:
+  # Child Workflow 1: Greeter (simple transform workflow)
+  greeter_wfspec#literal: |
+    wfspec_name: greeter
+    wfspec_version: 1.0.0
+    input_data:
+      name: ""
+    output_name: greeting
+    body:
+      sequence:
+        elements:
+          - transform:
+              output_data:
+                - greeting#: "Hello, {{ name }}! Welcome to moco workflows."
+
+  # Child Workflow 2: Data Processor (processes single item)
+  processor_wfspec#literal: |
+    wfspec_name: data-processor
+    wfspec_version: 1.0.0
+    input_data:
+      item: ""
+      index: 0
+    output_name: processed_result
+    body:
+      sequence:
+        elements:
+          - transform:
+              output_data:
+                - item_upper#: "{{ item.upper() }}"
+                - item_length: "{{ len(item) }}"
+                - processing_timestamp: "{{ str(now()) }}"
+          - transform:
+              output_data:
+                - processed_result:
+                    index: "{{ index }}"
+                    original: "{{ item }}"
+                    transformed: "{{ item_upper }}"
+                    length: "{{ item_length }}"
+                    processed_at: "{{ processing_timestamp }}"
+
+  # Child Workflow 3: Async Worker (long-running background task)
+  async_worker_wfspec#literal: |
+    wfspec_name: async-worker
+    wfspec_version: 1.0.0
+    input_data:
+      parent_workflow_id: ""
+      task_id: ""
+      duration_sec: 5
+    output_name: worker_result
+    body:
+      sequence:
+        elements:
+          # Simulate work with delay
+          - activity:
+              type: builtin.delay
+              input_data:
+                duration: "{{ duration_sec }}s"
+
+          # Generate result
+          - transform:
+              output_data:
+                - completion_time: "{{ str(now()) }}"
+                - worker_result#:
+                    task_id: "{{ task_id }}"
+                    status: "completed"
+                    completed_at: "{{ completion_time }}"
+                    message: "Background task {{ task_id }} finished successfully"
+
+          # Emit completion event to parent
+          - emit_event:
+              input_data:
+                target_workflow_id: '{{parent_workflow_id}}'
+                event_type: "async_worker_complete"
+                data:
+                  task_id: "{{ task_id }}"
+                  result: "{{ worker_result }}"
+                  source_workflow_id: "{{ __sys_info__.get('workflow_id') }}"
+
+# ================================================================================
+# INPUT DATA
+# ================================================================================
+
+input_data:
+  user_name: "Alice"
+  data_items:
+    - "apple"
+    # - "banana"
+    # - "cherry"
+    # - "date"
+
+# ================================================================================
+# OUTPUT
+# ================================================================================
+
+output_name: aggregated_results
+# ================================================================================
+# WORKFLOW BODY: STEP-BY-STEP LOGIC
+# ================================================================================
+
+body:
+  sequence:
+    elements:
+      # ======================================================================
+      # STEP 1: Initialize and log workflow start
+      # ======================================================================
+      - transform:
+          output_data:
+            - parent_workflow_id#: "{{ __sys_info__.get('workflow_id') }}"
+            - _log_start#: "Parent workflow {{ parent_workflow_id }} starting child workflow orchestration"
+
+      # ======================================================================
+      # STEP 2: Execute greeter child workflow in INLINE mode
+      # ======================================================================
+      # INLINE MODE: Child executes within parent's execution context
+      # - Child shares parent's execution stack
+      # - Child workflow ID is inline under parent ID
+      # - Parent waits for child to complete
+      # - Best for simple, fast child workflows
+      #
+      - transform:
+          output_data:
+            - _log_greeter#: "Executing greeter child workflow in inline mode"
+
+      - workflow:
+          wfspec:
+            content: "{{ greeter_wfspec }}"
+          child_mode: inline
+          input_data:
+            name: "{{ user_name }}"
+          output_data:
+            - greeting_result#: "{{ _raw_output }}"
+
+      # ======================================================================
+      # STEP 3: Execute processor child workflows in PARALLEL (sync)
+      # ======================================================================
+      # SYNC MODE: Each child executes as independent workflow
+      # - Child gets its own workflow ID (not inline under parent)
+      # - Parent waits for child to complete
+      # - Children can execute in parallel via iteration
+      # - Best for independent processing tasks
+      #
+      - transform:
+          output_data:
+            - _log_parallel#: "Launching {{ len(data_items) }} parallel processor workflows"
+
+      - iteration:
+          iter_type: parallel
+          join_type: and
+          input_data: data_items
+          body:
+            sequence:
+              elements:
+                - transform:
+                    output_data:
+                      - current_item@: "{{ iter_item }}"
+                      - current_index@: "{{ iter_items.index(iter_item) }}"
+                      - _log_processing#: "Processing item {{ current_index }}: {{ current_item }}"
+
+                - workflow:
+                    wfspec:
+                      content: "{{ processor_wfspec }}"
+                    child_mode: sync
+                    input_data:
+                      item: "{{ current_item }}"
+                      index: "{{ current_index }}"
+                    output_data:
+                      - processor_result: "{{ _raw_output }}"
+          output_data:
+            - processor_results: "{{ _raw_output }}"  # List of all processor outputs
+
+      # ======================================================================
+      # STEP 4: Launch async worker in ASYNC mode
+      # ======================================================================
+      # ASYNC MODE: Child executes independently, parent doesn't wait
+      # - Child gets its own workflow ID
+      # - Parent continues immediately without waiting
+      # - Coordination via events (child emits completion event)
+      # - Best for long-running background tasks
+      #
+      - transform:
+          output_data:
+            - async_task_id: "task-{{ str(uuid4())[:8] }}"
+            - _log_async#: "Launching async worker {{ async_task_id }} in background"
+
+      - workflow:
+          wfspec:
+            content: "{{ async_worker_wfspec }}"
+          child_mode: async
+          input_data:
+            parent_workflow_id: "{{ parent_workflow_id }}"
+            task_id: "{{ async_task_id }}"
+            duration_sec: 10
+          output_data:
+            - async_workflow_id#: "{{ _raw_output }}"
+            - _log_launched#: "Async worker launched: {{ async_workflow_id }}"
+
+      # ======================================================================
+      # STEP 5: Wait for async worker completion event
+      # ======================================================================
+      # Use wait_for to synchronize with async child workflow
+      # - Listen on shared event topic
+      # - Filter by event_type and task_id
+      # - Timeout ensures parent doesn't wait forever
+      #
+      - transform:
+          output_data:
+            - _log_waiting#: "Waiting for async worker {{ async_task_id }} to complete"
+
+      - wait_for:
+          event:
+            event_type: "async_worker_complete"
+            match_expression: "{{ event.get('data', {}).get('task_id') == async_task_id }}"
+          timeout_sec: 30.0
+          output_data:
+            - async_completion_event#: "{{ _raw_output }}"
+            - async_result#: "{{ _raw_output.get('data', {}).get('result', {}) }}"
+
+      # ======================================================================
+      # STEP 6: Aggregate all results
+      # ======================================================================
+      # Combine results from all child workflows into final output
+      #
+      - transform:
+          output_data:
+            - aggregated_results:
+                parent_workflow_id: "{{ parent_workflow_id }}"
+                greeting: "{{ greeting_result }}"
+                parallel_processing:
+                  total_items: "{{ len(data_items) }}"
+                  results: "{{ processor_results }}"
+                async_worker:
+                  workflow_id: "{{ async_workflow_id }}"
+                  task_id: "{{ async_task_id }}"
+                  result: "{{ async_result }}"
+                summary:
+                  total_child_workflows: "{{ 1 + len(data_items) + 1 }}"  # greeter + processors + async
+                  execution_modes_used:
+                    - inline
+                    - sync
+                    - async
+            - _log_complete#: "All child workflows completed successfully"

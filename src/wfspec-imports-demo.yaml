@@ -1,0 +1,68 @@
+wfspec_name: wfspec-imports-demo
+wfspec_version: 1.0.0
+
+# Demonstrates `wfspec_imports` -- pulling context variables out of another
+# wfspec instead of duplicating them.
+#
+# Each entry names a spec and version, then lists the context variables to
+# import. A null value keeps the original name; a string value renames it:
+#
+#   context:
+#     tax_rates:                  # import as `tax_rates`
+#     threshold: free_shipping_threshold   # import, renamed to `threshold`
+#
+# This is import of DATA, not behaviour -- for reusable logic use `functions`
+# (functions-demo) or a child workflow (child-workflow-modes-demo).
+#
+# Resolution is by registry name, so the imported spec must be resolvable. Both
+# files live in this package, so the CLI bundles them together and a plain
+# `moco run` works. Copy this file out on its own and the import will fail.
+
+tags: [moco-demo, level-4-composition]
+
+wfspec_imports:
+  - wfspec_name: shared-config-demo
+    wfspec_version: 1.0.0
+    context:
+      # same name
+      tax_rates:
+      shipping_tiers:
+      # renamed on the way in
+      threshold: free_shipping_threshold
+
+input_data:
+  country: GB
+  subtotal: 40.0
+  speed: express
+
+output_name: quote
+
+body:
+  sequence:
+    elements:
+      - transform:
+          name: show-imported-values
+          output_data:
+            - tax_rates#: '{{ tax_rates }}'
+            - threshold#: '{{ threshold }}'
+
+      - transform:
+          name: price-it
+          input_data:
+            tier: '{{ [t for t in shipping_tiers if t["name"] == speed][0] }}'
+          output_data:
+            - tax: '{{ round(subtotal * tax_rates[country], 2) }}'
+            - shipping: '{{ 0.0 if subtotal >= threshold else tier["cost"] }}'
+            - eta_days: '{{ tier["days"] }}'
+
+      - transform:
+          name: build-quote
+          output_data:
+            - quote:
+                country: '{{ country }}'
+                subtotal: '{{ subtotal }}'
+                tax: '{{ tax }}'
+                shipping: '{{ shipping }}'
+                eta_days: '{{ eta_days }}'
+                total: '{{ round(subtotal + tax + shipping, 2) }}'
+                free_shipping_applied: '{{ subtotal >= threshold }}'

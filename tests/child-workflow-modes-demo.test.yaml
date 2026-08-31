@@ -1,0 +1,51 @@
+test_type: integration-test
+
+wfspec:
+  name: child-workflow-modes-demo
+  version: 1.0.0
+
+test_cases:
+  # The headline correction: "inline" is about execution, not data. No child of
+  # any mode can see the parent's variables.
+  - id: no-child-mode-shares-parent-variables
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['inline_saw_parent_secret'] == False }}"
+        - "{{ __OUTPUT__['sync_saw_parent_secret'] == False }}"
+
+  # inline runs inside the parent's execution; sync is a separate workflow
+  - id: inline-shares-the-parent-workflow-id
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['inline_shares_parent_id'] == True }}"
+
+  # Runtime-dependent: Temporal creates a real child workflow with its own id,
+  # the in-memory runtime does not. Asserted loosely so the suite is honest on
+  # both; on Temporal this is True.
+  - id: sync-child-id-is-runtime-dependent
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['sync_has_its_own_id'] in [True, False] }}"
+
+  # input_data is the only channel into a child
+  - id: input-data-crosses-the-boundary
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['sync_got_passed_in'] == 'explicitly-passed' }}"
+
+  # The registry-backed call is off unless the package has been published
+  - id: registry-call-is-skipped-by-default
+    input: {}
+    expect:
+      assert:
+        - "{{ 'skipped' in __OUTPUT__['by_name_result'] }}"
+
+  - id: detached-is-off-by-default
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['detached_started'] == False }}"

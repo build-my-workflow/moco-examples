@@ -1,0 +1,7 @@
+{
+    "wfspec_package_name": "moco-examples",
+    "wfspec_package_version": "1.0.0",
+    "wfspec_description": "Simple demo workflows for MOCO",
+    "sources": ["src/**/*.yaml"],
+    "tests": ["tests/**/*.yaml"]
+}

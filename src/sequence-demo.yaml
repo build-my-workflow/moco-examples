@@ -1,0 +1,26 @@
+wfspec_name: sequence-demo
+wfspec_version: 1.0.0
+
+tags: [moco-demo, level-1-basics]
+
+output_name: greeting
+
+body:
+  sequence:
+    elements:
+      - transform:
+          output_data:
+            - start_time: '{{now()}}'
+
+      - activity:
+          name: delay-step
+          type: builtin.delay
+          input_data:
+            duration: 1s
+
+      - transform:
+          output_data:
+            - greeting: Hello, your request was received at {{start_time}}. Current time is {{now()}}
+
+
+

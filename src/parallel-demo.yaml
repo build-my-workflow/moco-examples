@@ -1,0 +1,69 @@
+wfspec_name: parallel-demo
+wfspec_version: 1.0.0
+
+tags: [moco-demo, level-3-control-flow]
+
+# Demonstrates the parallel composite statement.
+# Multiple branches execute concurrently; the workflow waits for all (join_type: and)
+# before continuing. Results from each branch are collected in the output.
+
+output_name: summary
+
+body:
+  sequence:
+    elements:
+      - transform:
+          output_data:
+            - log#: "Starting parallel branches..."
+
+      - parallel:
+          name: fetch-data-in-parallel
+          join_type: and
+          elements:
+            - sequence:
+                name: branch-a
+                elements:
+                  - transform:
+                      output_data:
+                        - log#: "Branch A: simulating fast task"
+                  - activity:
+                      name: branch-a-delay
+                      type: builtin.delay
+                      input_data:
+                        duration: 1s
+                  - transform:
+                      output_data:
+                        - branch_a_result@: "fast task done at {{now()}}"
+                output_data: '{{branch_a_result}}'
+
+            - sequence:
+                name: branch-b
+                elements:
+                  - transform:
+                      output_data:
+                        - log#: "Branch B: simulating slow task"
+                  - activity:
+                      name: branch-b-delay
+                      type: builtin.delay
+                      input_data:
+                        duration: 2s
+                  - transform:
+                      output_data:
+                        - branch_b_result@: "slow task done at {{now()}}"
+                output_data: '{{branch_b_result}}'
+
+            - sequence:
+                name: branch-c
+                elements:
+                  - transform:
+                      output_data:
+                        - branch_c_result@: "instant transform done at {{now()}}"
+                output_data: '{{branch_c_result}}'
+
+          output_name: parallel_results
+
+      - transform:
+          output_data:
+            - summary:
+                message: "All branches completed"
+                results: '{{parallel_results}}'

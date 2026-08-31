@@ -1,0 +1,17 @@
+test_type: integration-test
+
+wfspec:
+  name: single-activity-demo
+  version: 1.0.0
+
+test_cases:
+  # Happy path: delay completes and greeting is produced
+  - id: produces-greeting
+    input: {}
+    mocks:
+      - step_name: wait-and-greet
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ __OUTPUT__ is not None }}"
+        - "{{ __OUTPUT__.startswith('hello, the current time is') }}"

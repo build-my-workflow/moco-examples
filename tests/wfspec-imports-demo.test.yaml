@@ -1,0 +1,63 @@
+test_type: integration-test
+
+# REQUIRES A PUBLISHED PACKAGE.
+#
+# wfspec_imports resolves the imported spec by registry name and version.
+# Running a spec from source does not register it, so until this package is
+# published the import fails with:
+#   WorkflowSpecVersionNotAllowedError: WorkflowSpec version shared-config-demo:1.0.0
+#   doesn't exist or not allowed
+#
+# To run this suite:
+#   moco publish .
+#   # remove the `skip: true` below
+#   moco test tests/wfspec-imports-demo.test.yaml
+#
+# Left skipped so `moco test tests/` is green from a fresh checkout. This is the
+# one demo in the package that cannot run from source alone.
+
+skip: true
+
+wfspec:
+  name: wfspec-imports-demo
+  version: 1.0.0
+
+test_cases:
+  # GB rate is 0.20, subtotal 40 is under the 50.0 threshold so express
+  # shipping is charged
+  - id: imported-constants-drive-the-quote
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['tax'] == 8.0 }}"
+        - "{{ __OUTPUT__['shipping'] == 12.99 }}"
+        - "{{ __OUTPUT__['eta_days'] == 2 }}"
+        - "{{ __OUTPUT__['total'] == 60.99 }}"
+        - "{{ __OUTPUT__['free_shipping_applied'] == False }}"
+
+  # Over the imported threshold, shipping is waived
+  - id: threshold-import-waives-shipping
+    input:
+      subtotal: 100.0
+    expect:
+      assert:
+        - "{{ __OUTPUT__['shipping'] == 0.0 }}"
+        - "{{ __OUTPUT__['free_shipping_applied'] == True }}"
+
+  # A different country picks a different imported tax rate
+  - id: tax-rate-import-is-per-country
+    input:
+      country: US
+      subtotal: 100.0
+    expect:
+      assert:
+        - "{{ __OUTPUT__['tax'] == 8.0 }}"
+        - "{{ __OUTPUT__['total'] == 108.0 }}"
+
+  - id: standard-shipping-tier
+    input:
+      speed: standard
+    expect:
+      assert:
+        - "{{ __OUTPUT__['eta_days'] == 5 }}"
+        - "{{ __OUTPUT__['shipping'] == 4.99 }}"

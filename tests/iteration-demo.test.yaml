@@ -1,0 +1,52 @@
+test_type: integration-test
+
+wfspec:
+  name: iteration-demo
+  version: 1.0.0
+
+test_cases:
+  # Sequential iteration preserves input order
+  - id: sequential-iteration-preserves-order
+    input: {}
+    mocks:
+      - step_name: simulate-lookup
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ [l['id'] for l in __OUTPUT__['priced_lines']] == ['A', 'B', 'C'] }}"
+        - "{{ [l['amount'] for l in __OUTPUT__['priced_lines']] == [20.0, 40.0, 15.0] }}"
+        - "{{ __OUTPUT__['order_total'] == 75.0 }}"
+
+  # join_type: and collects every item
+  - id: parallel-and-collects-all-items
+    input: {}
+    mocks:
+      - step_name: simulate-lookup
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ len(__OUTPUT__['checks']) == 3 }}"
+        - "{{ sorted(__OUTPUT__['checks']) == ['A:ok', 'B:ok', 'C:ok'] }}"
+
+  # Nested loops: iter_items[0] is the outer item, iter_item the inner one
+  - id: nested-iteration-builds-the-grid
+    input: {}
+    mocks:
+      - step_name: simulate-lookup
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ __OUTPUT__['grid'] == [['x1', 'x2'], ['y1', 'y2']] }}"
+
+  - id: works-on-a-different-order-set
+    input:
+      orders:
+        - {id: Z, units: 1, price: 7.5}
+    mocks:
+      - step_name: simulate-lookup
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ __OUTPUT__['priced_lines'] == [{'id': 'Z', 'amount': 7.5}] }}"
+        - "{{ __OUTPUT__['order_total'] == 7.5 }}"
+        - "{{ __OUTPUT__['checks'] == ['Z:ok'] }}"

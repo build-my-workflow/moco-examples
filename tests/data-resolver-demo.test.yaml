@@ -1,0 +1,51 @@
+test_type: integration-test
+
+wfspec:
+  name: data-resolver-demo
+  version: 1.0.0
+
+test_cases:
+  - id: resolves-customer-and-prices
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['customer']['name'] == 'Ada Lovelace' }}"
+        - "{{ __OUTPUT__['customer']['tier'] == 'gold' }}"
+        - "{{ len(__OUTPUT__['prices']) == 3 }}"
+        - "{{ __OUTPUT__['subtotal'] == 40.25 }}"
+
+  # The resolver is keyed purely by its input, so an unknown key is handled
+  # inside the resolver rather than by the caller
+  - id: unknown-customer-falls-back
+    input:
+      customer_id: CUST-999
+    expect:
+      assert:
+        - "{{ __OUTPUT__['customer']['name'] == 'Unknown' }}"
+        - "{{ __OUTPUT__['customer']['tier'] == 'standard' }}"
+
+  # Driving the same resolver over a different list
+  - id: resolves-a-different-sku-list
+    input:
+      sku_list: [SKU-B]
+    expect:
+      assert:
+        - "{{ __OUTPUT__['prices'] == [{'sku': 'SKU-B', 'price': 25.5}] }}"
+        - "{{ __OUTPUT__['subtotal'] == 25.5 }}"
+
+  # Swapping the resolver implementation at runtime changes the result
+  - id: cache-resolver-applies-rate-1
+    input:
+      price_source: cache
+    expect:
+      assert:
+        - "{{ __OUTPUT__['fx_source'] == 'cache' }}"
+        - "{{ __OUTPUT__['subtotal_converted'] == 40.25 }}"
+
+  - id: catalog-resolver-applies-a-different-rate
+    input:
+      price_source: catalog
+    expect:
+      assert:
+        - "{{ __OUTPUT__['fx_source'] == 'catalog' }}"
+        - "{{ __OUTPUT__['subtotal_converted'] == 43.47 }}"

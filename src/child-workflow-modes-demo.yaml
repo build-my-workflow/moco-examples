@@ -1,0 +1,156 @@
+wfspec_name: child-workflow-modes-demo
+wfspec_version: 1.0.0
+
+# The `workflow` statement, along its two axes.
+#
+# AXIS 1 -- how the child is referenced:
+#   wfspec.name (+ version)   a deployed spec, resolved from the registry
+#   wfspec.content#literal    an inline spec, defined right here
+#
+# AXIS 2 -- child_mode:
+#
+#   inline     runs INSIDE the parent's execution: same workflow_id, no separate
+#              history, no separate retries. Cheapest. The parent waits.
+#   sync       a genuinely separate workflow with its own derived id, history,
+#              retries and timeouts. The parent waits for the result.
+#   async      independent, started and NOT waited for. The parent carries on.
+#              Cancelled if the parent finishes first -- pair it with wait_for
+#              (see events-demo) when the result matters.
+#   detached   like async, but survives the parent. Use for fire-and-forget work
+#              that must outlive this run.
+#
+# WHAT inline DOES NOT MEAN: it does not share the parent's variables. Every
+# child, inline included, starts with a fresh data context and sees only what is
+# handed to it via input_data. The report below proves it -- both children come
+# back with saw_parent_secret: false.
+#
+# So the inline/sync choice is about execution cost and isolation of FAILURE,
+# not about data. Reach for sync when the child needs its own retry policy or
+# its own entry in the workflow history; inline otherwise.
+#
+# RUNTIME DIFFERENCE: on Temporal a sync child is a real child workflow and gets
+# its own id (<parent-id>-None-1). The in-memory runtime does not create one, so
+# sync_has_its_own_id comes back false there. The data isolation above holds on
+# both. Verify sync-specific behaviour (retries, timeouts, history) on Temporal.
+
+tags: [moco-demo, level-4-composition]
+
+input_data:
+  # detached children outlive this workflow, so the demo leaves it off by
+  # default rather than leaking a background run on every execution.
+  run_detached: false
+  # Referencing a child by registry name only works once this package has been
+  # published (`moco publish`). Off by default so the file runs from source.
+  use_registry: false
+
+context:
+  # Neither child can see this -- that is the point. Proof in the report.
+  parent_secret: not-visible-to-any-child
+
+output_name: report
+
+body:
+  sequence:
+    elements:
+      # --- inline: runs inside the parent's own execution --------------------
+      - workflow:
+          name: inline-child
+          child_mode: inline
+          wfspec:
+            content#literal: |
+              wfspec_name: child-workflow-modes-demo-inline
+              wfspec_version: 1.0.0
+              output_data:
+                saw_parent_secret: '{{ "parent_secret" in _ }}'
+                # same id as the parent: this is not a separate workflow
+                wid: '{{ __sys_info__.get("workflow_id") }}'
+              body:
+                transform: {}
+          output_name: inline_result
+
+      # --- sync: a separate workflow, parent waits ---------------------------
+      # Same data isolation as inline, but a real child workflow: its id is
+      # derived from the parent's, and it gets its own history and retries.
+      - workflow:
+          name: sync-child
+          child_mode: sync
+          wfspec:
+            content#literal: |
+              wfspec_name: child-workflow-modes-demo-sync
+              wfspec_version: 1.0.0
+              input_data:
+                passed_in:
+              output_data:
+                saw_parent_secret: '{{ "parent_secret" in _ }}'
+                got_passed_in: '{{ passed_in }}'
+                wid: '{{ __sys_info__.get("workflow_id") }}'
+              body:
+                transform: {}
+          input_data:
+            passed_in: explicitly-passed
+          output_name: sync_result
+
+      # --- referencing a deployed spec by name ------------------------------
+      # The other style: no inline content, resolved from the registry by name
+      # and version. Requires the spec to be published -- running a spec from
+      # source does not register it. Enable with use_registry=true after:
+      #   moco publish .
+      - workflow:
+          name: call-by-name
+          condition: '{{ use_registry }}'
+          child_mode: sync
+          wfspec:
+            name: transform-demo
+            version: 1.0.0
+          output_name: by_name_result
+
+      # --- async: started, not waited for -----------------------------------
+      # There is no result to collect here. The child races the parent, and
+      # loses if the parent finishes first. To collect a result, have the child
+      # emit_event and wait_for it (events-demo).
+      - workflow:
+          name: async-child
+          child_mode: async
+          wfspec:
+            content#literal: |
+              wfspec_name: child-workflow-modes-demo-async
+              wfspec_version: 1.0.0
+              body:
+                activity:
+                  name: background-work
+                  type: builtin.delay
+                  input_data:
+                    duration: 1s
+
+      # --- detached: outlives the parent ------------------------------------
+      # Off by default. Unlike async, this child is not cancelled when the
+      # parent completes, so its effect is not observable from within this run.
+      - workflow:
+          name: detached-child
+          condition: '{{ run_detached }}'
+          child_mode: detached
+          wfspec:
+            content#literal: |
+              wfspec_name: child-workflow-modes-demo-detached
+              wfspec_version: 1.0.0
+              body:
+                activity:
+                  name: long-background-work
+                  type: builtin.delay
+                  input_data:
+                    duration: 5s
+
+      - transform:
+          name: build-report
+          output_data:
+            - _my_wid: '{{ __sys_info__.get("workflow_id") }}'
+            - report:
+                # neither child sees the parent's variables
+                inline_saw_parent_secret: '{{ inline_result["saw_parent_secret"] }}'
+                sync_saw_parent_secret: '{{ sync_result["saw_parent_secret"] }}'
+                # but only sync is a separate workflow
+                inline_shares_parent_id: '{{ inline_result["wid"] == _my_wid }}'
+                sync_has_its_own_id: '{{ sync_result["wid"] != _my_wid }}'
+                sync_got_passed_in: '{{ sync_result["got_passed_in"] }}'
+                by_name_result: '{{ by_name_result if "by_name_result" in _ else "skipped (use_registry=false)" }}'
+                detached_started: '{{ run_detached }}'

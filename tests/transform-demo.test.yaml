@@ -1,0 +1,24 @@
+test_type: integration-test
+
+wfspec:
+  name: transform-demo
+  version: 1.0.0
+
+test_cases:
+  # Happy path: user_id is extracted from __user_info__ and injected into greeting
+  - id: greets-with-user-id
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__ is not None }}"
+        - "{{ 'the current time is' in __OUTPUT__ }}"
+
+  # Explicit user context via __user_info__ override
+  - id: greets-named-user
+    input:
+      __user_info__:
+        user_id: "alice"
+    expect:
+      assert:
+        - "{{ __OUTPUT__.startswith('Hello alice') }}"
+        - "{{ 'the current time is' in __OUTPUT__ }}"

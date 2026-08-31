@@ -1,0 +1,101 @@
+wfspec_name: state-machine-basics-demo
+wfspec_version: 1.0.0
+
+# The smallest useful state machine: a document review.
+#
+#   draft --> in_review --> approved   (score >= threshold)
+#                       --> rejected   (score <  threshold)
+#
+# Two kinds of transition appear here:
+#   automatic      trigger: {}                 fires as soon as on_enter finishes
+#   conditional    trigger: {condition: ...}   automatic, but guarded
+#
+# The third kind, event-driven (trigger: {event_type: ...}), is left out so this
+# machine runs to completion on its own -- an event trigger with no publisher
+# would just block. See events-demo for the event bus, and the two
+# continue-as-new demos here for machines driven by sys.timer events.
+#
+# Conditional transitions out of one state must be mutually exclusive, and
+# should cover every case -- an uncovered case leaves the machine stuck.
+#
+# on_enter runs when a state is entered, on_exit when it is left. A state with
+# is_terminal: true ends the machine, and output_name captures the state it
+# finished in.
+#
+# For richer machines see ../state-machine-demo (scenarios), the two
+# continue-as-new demos here (durability), and ../entity-workflow-demo
+# (long-lived, addressable machines).
+
+tags: [moco-demo, level-7-engines]
+
+context:
+  history: []
+  score: 0
+
+input_data:
+  # Drives which branch the review takes
+  quality_score: 80
+  approval_threshold: 70
+
+output_name: final_state
+
+body:
+  state_machine:
+    initial_state: draft
+    output_name: final_state
+    states:
+      - name: draft
+        on_enter:
+          transform:
+            name: enter-draft
+            output_data:
+              - _t: '{{ history.append("entered draft") }}'
+        on_exit:
+          transform:
+            name: leave-draft
+            output_data:
+              - _t: '{{ history.append("left draft") }}'
+
+      - name: in_review
+        on_enter:
+          sequence:
+            elements:
+              - transform:
+                  name: enter-review
+                  output_data:
+                    - _t: '{{ history.append("entered in_review") }}'
+                    - score: '{{ quality_score }}'
+
+      - name: approved
+        is_terminal: true
+        on_enter:
+          transform:
+            name: enter-approved
+            output_data:
+              - _t: '{{ history.append("approved with score " + str(score)) }}'
+
+      - name: rejected
+        is_terminal: true
+        on_enter:
+          transform:
+            name: enter-rejected
+            output_data:
+              - _t: '{{ history.append("rejected with score " + str(score)) }}'
+
+    transitions:
+      # Automatic: no trigger, so it fires once draft's on_enter completes.
+      # Without this the machine would sit in draft waiting for an event.
+      - from_state: draft
+        to_state: in_review
+        trigger: {}
+
+      # The two branches out of in_review are mutually exclusive and total.
+      - from_state: in_review
+        to_state: approved
+        trigger:
+          condition: '{{ score >= approval_threshold }}'
+
+      - from_state: in_review
+        to_state: rejected
+        trigger:
+          condition: '{{ score < approval_threshold }}'

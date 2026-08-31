@@ -1,0 +1,58 @@
+test_type: integration-test
+
+wfspec:
+  name: expression-demo
+  version: 1.0.0
+
+test_cases:
+  - id: builtins-and-interpolation
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['greeting'] == 'Hi Ada, you have 5 items' }}"
+        - "{{ __OUTPUT__['total'] == 67.48 }}"
+        - "{{ __OUTPUT__['avg_price'] == 13.5 }}"
+        - "{{ __OUTPUT__['ranked'] == [25.0, 15.99, 12.99, 8.5, 5.0] }}"
+
+  - id: comprehensions-and-grouping
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['by_dept']['eng'] == ['Ada', 'Cy'] }}"
+        - "{{ __OUTPUT__['by_dept']['ops'] == ['Bo'] }}"
+        - "{{ __OUTPUT__['stats'] == {'headcount': 3, 'avg_salary': 106.7} }}"
+
+  # #literal must NOT be evaluated -- the braces survive as text.
+  # The expected value cannot be written inline here: an assert expression is
+  # itself evaluated, so a nested {{ }} would be expanded. Build it instead.
+  - id: literal-modifier-is-not-evaluated
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['template_kept_literal'] == 'Hello ' + '{'*2 + ' name ' + '}'*2 }}"
+        - "{{ 'Ada' not in __OUTPUT__['template_kept_literal'] }}"
+
+  # #jinja renders statements and filters a Python expression cannot
+  - id: jinja-modifier-renders-template
+    input: {}
+    expect:
+      assert:
+        - "{{ 'ADA (eng)' in __OUTPUT__['roster'] }}"
+        - "{{ 'BO (ops)' in __OUTPUT__['roster'] }}"
+        - "{{ __OUTPUT__['roster'].index('ADA') < __OUTPUT__['roster'].index('BO') }}"
+
+  - id: glom-modifier-resolves-path
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['first_dept'] == 'eng' }}"
+
+  - id: inputs-are-overridable
+    input:
+      name: Grace
+      prices: [1.0, 2.0, 3.0]
+    expect:
+      assert:
+        - "{{ __OUTPUT__['greeting'] == 'Hi Grace, you have 3 items' }}"
+        - "{{ __OUTPUT__['total'] == 6.0 }}"
+        - "{{ __OUTPUT__['avg_price'] == 2.0 }}"

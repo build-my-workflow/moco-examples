@@ -1,0 +1,39 @@
+test_type: integration-test
+
+wfspec:
+  name: events-demo
+  version: 1.0.0
+
+test_cases:
+  # The async child publishes, and the matching wait_for picks it up
+  - id: receives-event-from-async-child
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['fulfilment'] is not None }}"
+        - "{{ __OUTPUT__['fulfilment']['order_id'] == 'ORD-77' }}"
+        - "{{ __OUTPUT__['fulfilment']['status'] == 'shipped' }}"
+
+  # match_expression keys off the order id, so a different id still matches
+  # its own event
+  - id: match-expression-follows-the-order-id
+    input:
+      order_id: ORD-42
+    expect:
+      assert:
+        - "{{ __OUTPUT__['fulfilment']['order_id'] == 'ORD-42' }}"
+
+  # An async_mode activity's completion is delivered as an ordinary event
+  - id: async-activity-completion-arrives-as-an-event
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['lookup_status'] == 'completed' }}"
+
+  # Nothing publishes `cancelled`, so wait_for returns None -- not an error
+  - id: timeout-returns-none-rather-than-failing
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['cancelled'] == False }}"
+        - "{{ __OUTPUT__['timed_out_as_expected'] == True }}"

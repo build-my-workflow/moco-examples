@@ -1,0 +1,62 @@
+# ==============================================================================
+# RUNNER ENFORCEMENT CONTROL
+# ==============================================================================
+# This file is not a test of transform-demo. It is a test of the test runner.
+#
+# A suite that reports green only means something if the runner actually fails a
+# case whose expectations are not met. `sys.run_test.integration.yaml` initialises
+# every case to "pass" and relies on `sys.run_test.validate_test_case_expect` to
+# flip it to "fail"; the merge-back is
+#   test_case.update(_raw_output.get("test_case", {}))
+# under `catch_exception: true`. So if the validator itself ever errors, the
+# `.get(..., {})` default silently swallows it and the case stays green.
+#
+# The three deliberately-wrong cases below are `skip: true` so `moco test tests/`
+# stays green in normal use. To re-verify enforcement:
+#
+#   1. Remove the three `skip: true` lines.
+#   2. moco test tests/runner-enforcement-control.test.yaml --in-memory --verbose
+#   3. Expect exactly THREE failures and one pass.
+#   4. Restore the `skip: true` lines.
+#
+# Any deliberately-wrong case that reports *pass* means that expectation type is
+# not enforced, and every green in this package for that type is meaningless.
+# ==============================================================================
+
+test_type: integration-test
+
+wfspec:
+  name: transform-demo
+  version: 1.0.0
+
+test_cases:
+  # Positive control: proves the suite itself runs. Must always pass.
+  - id: control-assert-true
+    input: {}
+    expect:
+      assert:
+        - '{{ 1 == 1 }}'
+
+  # Negative control: a false assertion must fail.
+  - id: control-assert-false
+    skip: true
+    input: {}
+    expect:
+      assert:
+        - '{{ 1 == 2 }}'
+
+  # Negative control: a wrong expected output value must fail.
+  - id: control-output-mismatch
+    skip: true
+    input: {}
+    expect:
+      output:
+        - greeting: definitely-not-this-value
+
+  # Negative control: expecting an error from a workflow that succeeds must fail.
+  - id: control-error-not-raised
+    skip: true
+    input: {}
+    expect:
+      error:
+        error_type: AbortError

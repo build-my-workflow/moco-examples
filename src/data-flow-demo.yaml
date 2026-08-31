@@ -1,0 +1,151 @@
+wfspec_name: data-flow-demo
+wfspec_version: 1.0.0
+
+# Demonstrates where values live and how they move between steps.
+#
+# Three ways a workflow receives values:
+#   context:      initial variables, always present, overwritable at runtime
+#   input_data:   declared parameters with defaults, supplied by the caller
+#   (a statement's own input_data: values scoped to that one statement)
+#
+# Two ways a statement publishes values:
+#   output_name:  bind the statement's raw result to a single variable
+#   output_data:  project/reshape the result into one or more variables
+#
+# Inside output_data, `_raw_output` is the statement's unprojected result.
+#
+# The same two knobs exist at the top level and decide the WORKFLOW's result:
+#   output_name: greeting   -> the workflow returns the bare value of `greeting`
+#   output_data: {...}      -> the workflow returns that dict
+# This matters for tests: with `output_name`, the result is a scalar and there
+# is no key to match on, so assertions must use `__OUTPUT__`.
+
+tags: [moco-demo, level-2-data-flow]
+
+context:
+  # Always defined. A caller can still override it.
+  currency: USD
+  audit_trail: []
+
+input_data:
+  # Declared parameters. These are the defaults.
+  order_id: ORD-001
+  quantity: 3
+  unit_price: 19.99
+
+output_data:
+  order_id: '{{ order_id }}'
+  total: '{{ total }}'
+  currency: '{{ currency }}'
+  label: '{{ label }}'
+  resolved: '{{ resolved }}'
+  audit_trail: '{{ audit_trail }}'
+
+body:
+  sequence:
+    elements:
+      # --- statement-level input_data ---------------------------------------
+      # `tax_rate` and `subtotal` exist only for this statement. They are not
+      # added to the workflow context, so nothing downstream can read them.
+      - transform:
+          name: compute-total
+          input_data:
+            tax_rate: 0.08
+            subtotal: '{{ quantity * unit_price }}'
+          output_data:
+            - total: '{{ round(subtotal * (1 + tax_rate), 2) }}'
+            - _t: '{{ audit_trail.append("computed total") }}'
+
+      # Proof: tax_rate is gone. `_` is the root context, so `in _` is the
+      # idiomatic "is this variable defined?" check.
+      - transform:
+          name: prove-statement-input-is-scoped
+          output_data:
+            - tax_rate_visible#: '{{ "tax_rate" in _ }}'
+
+      # --- output_name vs output_data on a statement ------------------------
+      # output_name binds the whole raw result under one name.
+      - workflow:
+          name: resolve-by-output-name
+          wfspec:
+            content#literal: |
+              wfspec_name: data-flow-demo-resolver
+              wfspec_version: 1.0.0
+              input_data:
+                code:
+              output_data:
+                label: 'order {{ code }}'
+                region: EMEA
+              body:
+                transform: {}
+          child_mode: inline
+          input_data:
+            code: '{{ order_id }}'
+          output_name: resolved
+
+      # output_data projects the raw result instead, and can rename or reshape.
+      # `_raw_output` is the child's result: {label: ..., region: ...}
+      - workflow:
+          name: resolve-by-output-data
+          wfspec:
+            content#literal: |
+              wfspec_name: data-flow-demo-resolver-2
+              wfspec_version: 1.0.0
+              input_data:
+                code:
+              output_data:
+                label: 'order {{ code }}'
+                region: EMEA
+              body:
+                transform: {}
+          child_mode: inline
+          input_data:
+            code: '{{ order_id }}'
+          output_data:
+            - label: '{{ _raw_output["label"] }}'
+            - _t: '{{ audit_trail.append("resolved label") }}'
+
+      # --- GOTCHA: shadowing inside a workflow statement's output_data -------
+      # A child's returned top-level keys are bound as variables in this scope.
+      # The child below returns a key called `currency`, so `currency` here is
+      # the CHILD's value (EUR), not the outer context value (USD) -- and any
+      # mutation of it is discarded when the statement ends.
+      #
+      # Rule: never reuse an outer variable's name for a child output key.
+      # Bind the whole result with output_name and unpack it in a later step.
+      - workflow:
+          name: shadowing-gotcha
+          wfspec:
+            content#literal: |
+              wfspec_name: data-flow-demo-fx
+              wfspec_version: 1.0.0
+              output_data:
+                currency: EUR
+              body:
+                transform: {}
+          child_mode: inline
+          output_data:
+            - currency_seen_inside#: '{{ currency }}'
+
+      - transform:
+          name: prove-outer-currency-untouched
+          output_data:
+            - currency_after#: '{{ currency }}'
+
+      # --- output_data on a composite ---------------------------------------
+      # A sequence can project its own result, which is what the enclosing
+      # statement sees.
+      - sequence:
+          name: summarise
+          elements:
+            - transform:
+                name: build-parts
+                output_data:
+                  - _t: '{{ audit_trail.append("summarised") }}'
+          output_data: '{{ "order " + order_id + " total " + str(total) + " " + currency }}'
+          output_name: summary_line
+
+      - transform:
+          name: log-summary
+          output_data:
+            - summary_line#: '{{ summary_line }}'

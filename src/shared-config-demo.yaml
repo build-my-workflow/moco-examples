@@ -1,0 +1,25 @@
+wfspec_name: shared-config-demo
+wfspec_version: 1.0.0
+
+# A context-only wfspec: constants for other specs to import.
+#
+# There is no `body` -- the schema only requires `wfspec_name`, so a spec can be
+# pure data. Running this on its own does nothing useful; it exists to be pulled
+# in via `wfspec_imports` (see wfspec-imports-demo).
+#
+# Keeping shared constants in one spec means callers cannot drift apart, and the
+# values are versioned like any other spec.
+
+tags: [moco-demo, level-4-composition, support-file]
+
+context:
+  tax_rates:
+    US: 0.08
+    GB: 0.20
+    DE: 0.19
+
+  shipping_tiers:
+    - {name: standard, days: 5, cost: 4.99}
+    - {name: express, days: 2, cost: 12.99}
+
+  free_shipping_threshold: 50.0

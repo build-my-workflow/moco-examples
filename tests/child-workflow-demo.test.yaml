@@ -1,0 +1,31 @@
+test_type: integration-test
+
+wfspec:
+  name: child-workflow-demo
+  version: 1.0.0
+
+test_cases:
+  # The inline greeter, the sync fan-out and the async worker all report back
+  - id: all-three-child-modes-contribute
+    input: {}
+    expect:
+      assert:
+        - "{{ 'Hello' in __OUTPUT__['greeting'] }}"
+        - "{{ __OUTPUT__['parallel_processing'] is not None }}"
+        - "{{ __OUTPUT__['async_worker'] is not None }}"
+
+  # The async child's result is collected via emit_event + wait_for, so a
+  # completed status proves the join worked rather than timing out
+  - id: async-child-result-is-joined-not-lost
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['async_worker']['result']['status'] == 'completed' }}"
+        - "{{ __OUTPUT__['async_worker']['task_id'] is not None }}"
+
+  - id: greets-the-supplied-user
+    input:
+      user_name: Grace
+    expect:
+      assert:
+        - "{{ 'Grace' in __OUTPUT__['greeting'] }}"

@@ -1,0 +1,133 @@
+wfspec_name: data-resolver-demo
+wfspec_version: 1.0.0
+
+# The child-workflow-as-data-resolver pattern.
+#
+# Instead of inlining a fetch-and-reshape block wherever data is needed, put it
+# in a child workflow that does one job: take a key, return a value. The parent
+# stays a readable pipeline and the resolver is independently testable.
+#
+# Why it is worth the ceremony:
+#   - the resolver has its own input_data contract, so it cannot silently depend
+#     on a parent variable that later gets renamed
+#   - each call is a named step, so it can be mocked in tests
+#   - swapping the source (cache -> HTTP -> database) touches one spec
+#
+# Two refinements shown below:
+#   1. resolving many keys at once by driving the resolver from an iteration
+#   2. choosing the resolver spec dynamically, by building its name at runtime
+
+tags: [moco-demo, level-4-composition]
+
+input_data:
+  customer_id: CUST-1
+  sku_list: [SKU-A, SKU-B, SKU-C]
+  # 'cache' or 'catalog' -- selects which resolver spec is used
+  price_source: cache
+
+output_name: order_view
+
+body:
+  sequence:
+    elements:
+      # --- 1. a single resolver call ----------------------------------------
+      # The parent gives it a key and gets back a value. Nothing else crosses
+      # the boundary.
+      - workflow:
+          name: resolve-customer
+          child_mode: inline
+          wfspec:
+            content#literal: |
+              wfspec_name: data-resolver-demo-customer
+              wfspec_version: 1.0.0
+              input_data:
+                customer_id:
+              output_data:
+                id: '{{ customer_id }}'
+                name: '{{ {"CUST-1": "Ada Lovelace", "CUST-2": "Grace Hopper"}.get(customer_id, "Unknown") }}'
+                tier: '{{ "gold" if customer_id == "CUST-1" else "standard" }}'
+              body:
+                transform: {}
+          input_data:
+            customer_id: '{{ customer_id }}'
+          output_name: customer
+
+      # --- 2. the same resolver, driven across a list -----------------------
+      # The iteration supplies one key per pass; the resolver stays unaware that
+      # it is being called in a loop.
+      - iteration:
+          name: resolve-each-price
+          iter_type: parallel
+          input_data: '{{ sku_list }}'
+          body:
+            sequence:
+              elements:
+                - workflow:
+                    name: resolve-price
+                    child_mode: inline
+                    wfspec:
+                      content#literal: |
+                        wfspec_name: data-resolver-demo-price
+                        wfspec_version: 1.0.0
+                        input_data:
+                          sku:
+                        output_data:
+                          sku: '{{ sku }}'
+                          price: '{{ {"SKU-A": 10.0, "SKU-B": 25.5, "SKU-C": 4.75}.get(sku, 0.0) }}'
+                        body:
+                          transform: {}
+                    input_data:
+                      sku: '{{ iter_item }}'
+                    output_name: priced@
+              output_data: '{{ priced }}'
+          output_name: prices
+
+      # --- 3. picking the resolver at runtime --------------------------------
+      # wfspec.name is an expression, so the parent can choose an implementation
+      # per call. Both specs below satisfy the same contract, which is what makes
+      # the swap safe.
+      - transform:
+          name: pick-resolver
+          output_data:
+            - resolver_spec: |
+                {{
+                  {
+                    "cache":   "data-resolver-demo-fx-cache",
+                    "catalog": "data-resolver-demo-fx-catalog"
+                  }[price_source]
+                }}
+            - _cache_spec: |
+                wfspec_name: data-resolver-demo-fx-cache
+                wfspec_version: 1.0.0
+                output_data:
+                  rate: 1.0
+                  source: cache
+                body:
+                  transform: {}
+            - _catalog_spec: |
+                wfspec_name: data-resolver-demo-fx-catalog
+                wfspec_version: 1.0.0
+                output_data:
+                  rate: 1.08
+                  source: catalog
+                body:
+                  transform: {}
+            - resolver_content: '{{ _cache_spec if price_source == "cache" else _catalog_spec }}'
+
+      - workflow:
+          name: resolve-fx
+          child_mode: inline
+          wfspec:
+            name: '{{ resolver_spec }}'
+            content: '{{ resolver_content }}'
+          output_name: fx
+
+      - transform:
+          name: assemble-view
+          output_data:
+            - order_view:
+                customer: '{{ customer }}'
+                prices: '{{ prices }}'
+                fx_source: '{{ fx["source"] }}'
+                subtotal: '{{ round(sum(p["price"] for p in prices), 2) }}'
+                subtotal_converted: '{{ round(sum(p["price"] for p in prices) * fx["rate"], 2) }}'

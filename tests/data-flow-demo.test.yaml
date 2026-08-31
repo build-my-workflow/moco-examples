@@ -1,0 +1,51 @@
+test_type: integration-test
+
+wfspec:
+  name: data-flow-demo
+  version: 1.0.0
+
+test_cases:
+  - id: computes-total-from-inputs
+    input: {}
+    expect:
+      # This workflow uses top-level output_data, so the result is a dict and
+      # expect.output can match its top-level keys directly.
+      output:
+        - order_id: ORD-001
+        - total: 64.77
+        - currency: USD
+
+  - id: caller-overrides-input-and-context
+    input:
+      order_id: ORD-999
+      quantity: 2
+      unit_price: 100.0
+      currency: GBP
+    expect:
+      assert:
+        - "{{ __OUTPUT__['order_id'] == 'ORD-999' }}"
+        - "{{ __OUTPUT__['total'] == 216.0 }}"
+        - "{{ __OUTPUT__['currency'] == 'GBP' }}"
+
+  # output_name binds the child's whole result; output_data projects one field
+  - id: child-results-are-bound-both-ways
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['resolved'] == {'label': 'order ORD-001', 'region': 'EMEA'} }}"
+        - "{{ __OUTPUT__['label'] == 'order ORD-001' }}"
+
+  # The shadowing gotcha: a child returning a `currency` key cannot clobber the
+  # outer `currency`, because inside that output_data the name refers to the
+  # child's value and the mutation is discarded.
+  - id: child-output-key-does-not-clobber-outer-variable
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['currency'] == 'USD' }}"
+
+  - id: audit-trail-accumulates-in-order
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['audit_trail'] == ['computed total', 'resolved label', 'summarised'] }}"

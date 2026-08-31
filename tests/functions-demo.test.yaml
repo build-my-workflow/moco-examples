@@ -1,0 +1,31 @@
+test_type: integration-test
+
+wfspec:
+  name: functions-demo
+  version: 1.0.0
+
+test_cases:
+  - id: calls-function-and-composed-function
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['sum'] == 8 }}"
+        - "{{ __OUTPUT__['sum_squared'] == 64 }}"
+
+  - id: arguments-are-mapped-per-call
+    input:
+      x: 10
+      y: 2
+    expect:
+      assert:
+        - "{{ __OUTPUT__['sum'] == 12 }}"
+        - "{{ __OUTPUT__['sum_squared'] == 144 }}"
+
+  - id: handles-zero-and-negatives
+    input:
+      x: -4
+      y: 4
+    expect:
+      assert:
+        - "{{ __OUTPUT__['sum'] == 0 }}"
+        - "{{ __OUTPUT__['sum_squared'] == 0 }}"

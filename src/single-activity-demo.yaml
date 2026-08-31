@@ -1,0 +1,13 @@
+wfspec_name: single-activity-demo
+wfspec_version: 1.0.0
+
+tags: [moco-demo, level-1-basics]
+output_name: greeting
+body:
+  activity:
+    name: wait-and-greet
+    type: builtin.delay
+    input_data:
+      duration: 1s
+    output_data:
+      greeting: 'hello, the current time is {{now()}}'

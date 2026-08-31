@@ -1,0 +1,113 @@
+wfspec_name: moco-examples
+wfspec_version: 1.0.0
+
+# Smoke runner for the package: runs a list of demos as child workflows and
+# reports pass/fail for each.
+#
+# The list is DATA, not hand-written statements, so adding a demo is a one-line
+# edit here (or an override at call time) rather than another copy-pasted block.
+# The previous version listed each child explicitly and drifted out of date.
+#
+# Each child runs with catch_exception: true, so a demo that fails AT RUNTIME
+# comes back as {"result": "error", ...} and is recorded as a failed row instead
+# of killing the run -- which is the point of a smoke test.
+#
+# catch_exception does NOT cover a demo that cannot be RESOLVED: that fails
+# before the child starts, and takes the whole run with it. Which leads to:
+#
+# THIS FILE REQUIRES A PUBLISHED PACKAGE (`moco publish .`).
+# Children are referenced by a dynamic name ('{{ iter_item }}'), and a dynamic
+# name is not resolved from the local package bundle the way a literal one is --
+# it goes to the registry. Running an unpublished package gives:
+#   WorkflowSpecVersionNotAllowedError: WorkflowSpec version <demo>:1.0.0
+#   doesn't exist or not allowed
+# To smoke-test from source instead, run the individual files (see the README).
+#
+# WHAT IS NOT IN THE DEFAULT LIST, and why:
+#   activity-options-demo    can make live HTTP calls
+#   state-store-demo         needs the persistent state store
+#   wfspec-imports-demo      needs the package published
+#   continue-as-new-demo     Temporal-only, and slow
+#   state-machine-continue-as-new-demo        Temporal-only, and slow
+#   state-machine-continue-as-new-timer-demo  Temporal-only, and slow
+#   events-demo, child-workflow-demo          several seconds of real delays
+#   moco-examples       itself
+#
+# Run any of them anyway by passing your own list:
+#   moco run src/moco-examples.yaml -i '{"demos":["events-demo"]}'
+
+tags: [moco-demo, level-1-basics, requires-published-package]
+
+input_data:
+  demos:
+    - single-activity-demo
+    - transform-demo
+    - sequence-demo
+    - parallel-demo
+    - condition-demo
+    - iteration-demo
+    - functions-demo
+    - expression-demo
+    - data-flow-demo
+    - data-resolver-demo
+    - variable-modifier-demo
+    - container-scope-variable-demo
+    - state-machine-basics-demo
+    - rules-engine-basics-demo
+
+context:
+  results: []
+
+output_name: demo_summary
+
+body:
+  sequence:
+    elements:
+      - transform:
+          name: announce
+          output_data:
+            - _log#: 'running {{ len(demos) }} demos'
+
+      - iteration:
+          name: run-each-demo
+          iter_type: sequence
+          input_data: '{{ demos }}'
+          body:
+            sequence:
+              elements:
+                # wfspec.name is an expression, so one statement covers them all
+                - workflow:
+                    name: run-demo
+                    child_mode: sync
+                    wfspec:
+                      name: '{{ iter_item }}'
+                      version: 1.0.0
+                    execute_options:
+                      catch_exception: true
+                    output_name: child_output@
+
+                # catch_exception turns a failure into a result dict rather than
+                # an exception, so inspect it instead of assuming success
+                - transform:
+                    name: score-demo
+                    output_data:
+                      - _failed: '{{ isinstance(child_output, dict) and child_output.get("result") == "error" }}'
+                      - row@:
+                          demo: '{{ iter_item }}'
+                          status: '{{ "fail" if _failed else "pass" }}'
+                          error: '{{ child_output.get("error_message") if _failed else None }}'
+                      - _t: '{{ results.append(row) }}'
+                      - _log#: '{{ row["status"] }}: {{ iter_item }}'
+
+      - transform:
+          name: summarise
+          output_data:
+            - _passed: '{{ [r for r in results if r["status"] == "pass"] }}'
+            - _failed_rows: '{{ [r for r in results if r["status"] == "fail"] }}'
+            - demo_summary#:
+                total: '{{ len(results) }}'
+                passed: '{{ len(_passed) }}'
+                failed: '{{ len(_failed_rows) }}'
+                all_passed: '{{ len(_failed_rows) == 0 }}'
+                failures: '{{ _failed_rows }}'
+                results: '{{ results }}'

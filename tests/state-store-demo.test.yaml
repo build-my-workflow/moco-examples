@@ -1,0 +1,110 @@
+test_type: integration-test
+
+# Every builtin.state.* step is mocked by name, so this suite neither needs a
+# state backend nor writes to the real one. What it verifies is the workflow's
+# logic around the store -- the read-modify-write, the absent-key default, and
+# the post-delete read.
+#
+# To exercise the real store instead:
+#   moco run src/state-store-demo.yaml
+#   moco state list --namespace state-store-demo
+
+wfspec:
+  name: state-store-demo
+  version: 1.0.0
+
+test_cases:
+  # An absent key reads back as None and must default to 0, not blow up
+  - id: absent-counter-starts-at-zero
+    input: {}
+    mocks:
+      - step_name: read-counter
+        _raw_output: null
+      - step_name: write-counter
+        _raw_output: null
+      - step_name: write-cursor
+        _raw_output: null
+      - step_name: read-cursor
+        _raw_output: "2026-08-18T00:00:00Z"
+      - step_name: list-keys
+        _raw_output:
+          - {key: run-counter, topic: null}
+      - step_name: delete-cursor
+        _raw_output: null
+      - step_name: read-deleted-cursor
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ __OUTPUT__['previous_count'] == 0 }}"
+        - "{{ __OUTPUT__['current_count'] == 1 }}"
+
+  # An existing counter is read, incremented and written back
+  - id: existing-counter-is-incremented
+    input: {}
+    mocks:
+      - step_name: read-counter
+        _raw_output: 7
+      - step_name: write-counter
+        _raw_output: null
+      - step_name: write-cursor
+        _raw_output: null
+      - step_name: read-cursor
+        _raw_output: "2026-08-18T00:00:00Z"
+      - step_name: list-keys
+        _raw_output:
+          - {key: run-counter, topic: null}
+          - {key: last-cursor, topic: null}
+      - step_name: delete-cursor
+        _raw_output: null
+      - step_name: read-deleted-cursor
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ __OUTPUT__['previous_count'] == 7 }}"
+        - "{{ __OUTPUT__['current_count'] == 8 }}"
+
+  # After del_state, a read comes back None
+  - id: deleted-key-reads-back-as-none
+    input: {}
+    mocks:
+      - step_name: read-counter
+        _raw_output: 1
+      - step_name: write-counter
+        _raw_output: null
+      - step_name: write-cursor
+        _raw_output: null
+      - step_name: read-cursor
+        _raw_output: "2026-08-18T00:00:00Z"
+      - step_name: list-keys
+        _raw_output: []
+      - step_name: delete-cursor
+        _raw_output: null
+      - step_name: read-deleted-cursor
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ __OUTPUT__['cursor_after_delete'] is None }}"
+        - "{{ __OUTPUT__['delete_worked'] == True }}"
+
+  # The cursor value round-trips from input through set_state to get_state
+  - id: cursor-round-trips
+    input:
+      cursor_value: "2026-01-01T12:00:00Z"
+    mocks:
+      - step_name: read-counter
+        _raw_output: 0
+      - step_name: write-counter
+        _raw_output: null
+      - step_name: write-cursor
+        _raw_output: null
+      - step_name: read-cursor
+        _raw_output: "2026-01-01T12:00:00Z"
+      - step_name: list-keys
+        _raw_output: []
+      - step_name: delete-cursor
+        _raw_output: null
+      - step_name: read-deleted-cursor
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ __OUTPUT__['stored_cursor'] == '2026-01-01T12:00:00Z' }}"

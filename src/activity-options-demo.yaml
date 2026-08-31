@@ -1,0 +1,130 @@
+wfspec_name: activity-options-demo
+wfspec_version: 1.0.0
+
+# The knobs on an `activity` statement, beyond type/input_data/output_data.
+#
+#   retry_policy     timeouts and retry behaviour
+#   enable_cache     reuse a previous result for identical input
+#   cache_policy     how long that reuse lasts
+#   execute_locally  run in the calling process instead of dispatching to a worker
+#   async_mode       start without blocking (see events-demo)
+#
+# RUNTIME CAVEAT, from the schema's own docstring on RetryPolicy:
+#   "Only the Temporalio runtime honors these settings; the in-memory runtime
+#    ignores them."
+# So an in-memory run proves the spec parses, not that retries happen. Verify
+# retry and timeout behaviour on Temporal.
+#
+# NETWORK: the HTTP steps call https://httpbin.org, chosen because it echoes the
+# request back and returns a fresh uuid per call -- which is what makes the cache
+# visible. They are OFF by default so this file runs anywhere:
+#
+#   moco run src/activity-options-demo.yaml                      # offline
+#   moco run src/activity-options-demo.yaml -i '{"offline":false}'  # live calls
+#
+# The live path needs outbound HTTPS and a working CA bundle. Behind a
+# TLS-inspecting proxy it fails with CERTIFICATE_VERIFY_FAILED; http.request
+# takes skip_cert_verify: true as a dev-only escape hatch, deliberately not used
+# here.
+
+tags: [moco-demo, level-6-activities, requires-network]
+
+input_data:
+  offline: true
+
+output_name: report
+
+body:
+  sequence:
+    elements:
+      # --- builtin.now: no input, returns a timestamp -----------------------
+      - activity:
+          name: get-timestamp
+          type: builtin.now
+          output_name: started_at
+
+      # --- retry_policy ------------------------------------------------------
+      # timeout_sec bounds one attempt; max_attempts bounds the number of
+      # attempts; the interval grows by backoff_coefficient each time.
+      # non_retryable_error_types opts specific failures out of retrying, so a
+      # deterministic error (a 400, say) fails fast instead of burning attempts.
+      - activity:
+          name: fetch-with-retry
+          condition: '{{ not offline }}'
+          type: http.request
+          input_data:
+            method: GET
+            url: https://httpbin.org/get?demo=retry
+          retry_policy:
+            timeout_sec: 10
+            max_attempts: 3
+            initial_interval_sec: 1
+            backoff_coefficient: 2.0
+            non_retryable_error_types:
+              - ValueError
+          output_data:
+            - fetched_args: '{{ _raw_output.get("json", {}).get("args") if _raw_output else None }}'
+
+      # --- caching -----------------------------------------------------------
+      # Identical input within the window reuses the first result instead of
+      # calling out again. The two steps below are deliberately identical; the
+      # second should be served from cache.
+      - activity:
+          name: cached-fetch-first
+          condition: '{{ not offline }}'
+          type: http.request
+          enable_cache: true
+          cache_policy:
+            expire_in_seconds: 60
+          input_data:
+            method: GET
+            url: https://httpbin.org/uuid
+          output_data:
+            - uuid_first: '{{ _raw_output.get("json", {}).get("uuid") if _raw_output else None }}'
+
+      - activity:
+          name: cached-fetch-second
+          condition: '{{ not offline }}'
+          type: http.request
+          enable_cache: true
+          cache_policy:
+            expire_in_seconds: 60
+          input_data:
+            method: GET
+            url: https://httpbin.org/uuid
+          output_data:
+            - uuid_second: '{{ _raw_output.get("json", {}).get("uuid") if _raw_output else None }}'
+
+      # Same endpoint, caching off -- a fresh uuid every time. Contrast with the
+      # pair above to see the cache actually doing something.
+      - activity:
+          name: uncached-fetch
+          condition: '{{ not offline }}'
+          type: http.request
+          enable_cache: false
+          input_data:
+            method: GET
+            url: https://httpbin.org/uuid
+          output_data:
+            - uuid_uncached: '{{ _raw_output.get("json", {}).get("uuid") if _raw_output else None }}'
+
+      # --- execute_locally ----------------------------------------------------
+      # Runs in the calling process rather than being dispatched to a worker.
+      # Cheaper for trivial work; unavailable for anything needing worker-side
+      # credentials or libraries.
+      - activity:
+          name: local-delay
+          type: builtin.delay
+          execute_locally: true
+          input_data:
+            duration: 1s
+
+      - transform:
+          name: build-report
+          output_data:
+            - report:
+                started_at: '{{ started_at }}'
+                offline: '{{ offline }}'
+                fetched_args: '{{ fetched_args if "fetched_args" in _ else None }}'
+                cache_hit: '{{ (uuid_first == uuid_second) if "uuid_second" in _ else None }}'
+                uncached_differs: '{{ (uuid_uncached != uuid_first) if "uuid_uncached" in _ else None }}'

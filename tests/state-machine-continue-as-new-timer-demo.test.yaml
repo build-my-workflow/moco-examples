@@ -1,0 +1,32 @@
+test_type: integration-test
+
+# SKIPPED: this demo does not terminate quickly by design.
+#
+# The `wait` state ticks a 1s timer and only emits `exit` once wait_count
+# reaches 1000, so a full run takes ~17 minutes -- the point being to sit in one
+# state long enough for the 60s checkpoint_policy timer to fire repeatedly.
+# max_wait_count is hard-coded in the transition condition rather than exposed
+# as input, so a test cannot shorten it without editing the spec.
+#
+# To run it anyway:
+#   # lower the `wait_count>=1000` guard in
+#   # src/state-machine-continue-as-new-timer-demo.yaml, then
+#   moco test tests/state-machine-continue-as-new-timer-demo.test.yaml
+#
+# Or just watch the checkpoints happen live:
+#   moco run src/state-machine-continue-as-new-timer-demo.yaml --debug
+#
+# Worth fixing in the spec: parameterising that guard would make this testable.
+
+skip: true
+
+wfspec:
+  name: state-machine-continue-as-new-timer-demo
+  version: 1.0.0
+
+test_cases:
+  - id: reaches-terminal-state-across-timer-checkpoints
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'exit' }}"

@@ -1,0 +1,39 @@
+test_type: integration-test
+
+# checkpoint_policy with event_count: the `wait` state asks to checkpoint every
+# 3 events, and the runtime resumes the machine back in `wait` afterwards.
+#
+# SLOW: the wait state has timeout_sec 5 and runs to max_wait_count (8 by
+# default), so a case takes roughly 40s. max_wait_count is lowered below to keep
+# the suite quick.
+
+wfspec:
+  name: state-machine-continue-as-new-demo
+  version: 1.0.0
+
+test_cases:
+  # Reaches the terminal state despite checkpointing partway through
+  - id: reaches-terminal-state-across-checkpoints
+    input:
+      max_wait_count: 4
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'exit' }}"
+
+  # Fewer timer ticks than the checkpoint threshold: no checkpoint fires, and
+  # the machine still terminates normally
+  - id: terminates-without-reaching-the-checkpoint
+    input:
+      max_wait_count: 2
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'exit' }}"
+
+  # More ticks than the threshold, so at least one checkpoint fires and the
+  # machine is resumed in `wait` rather than restarted from `init`
+  - id: survives-multiple-checkpoints
+    input:
+      max_wait_count: 7
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'exit' }}"

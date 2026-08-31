@@ -1,0 +1,28 @@
+test_type: integration-test
+
+wfspec:
+  name: parallel-demo
+  version: 1.0.0
+
+test_cases:
+  # Happy path: all three branches complete, results are collected
+  - id: all-branches-complete
+    input: {}
+    mocks:
+      - step_name: branch-a-delay
+        _raw_output: null
+      - step_name: branch-b-delay
+        _raw_output: null
+    expect:
+      output:
+        # expect.output matches top-level keys of the workflow output. This workflow's
+        # output_name is 'summary', so the output IS the summary dict -- the key is
+        # 'message', not 'summary.message' (dotted paths are not supported).
+        - message: "All branches completed"
+      assert:
+        - "{{ __OUTPUT__ is not None }}"
+        - "{{ __OUTPUT__['results'] is not None }}"
+        - "{{ len(__OUTPUT__['results']) == 3 }}"
+        - "{{ 'fast task done at' in __OUTPUT__['results'][0] }}"
+        - "{{ 'slow task done at' in __OUTPUT__['results'][1] }}"
+        - "{{ 'instant transform done at' in __OUTPUT__['results'][2] }}"

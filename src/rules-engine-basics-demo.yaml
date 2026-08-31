@@ -1,0 +1,151 @@
+wfspec_name: rules-engine-basics-demo
+wfspec_version: 1.0.0
+
+# The smallest useful rules engine: shipping eligibility.
+#
+# A rule is `if` (a condition over facts) then `then` (new facts, and optionally
+# actions). The engine runs rules repeatedly against working memory, so a fact
+# derived by one rule can satisfy another -- chaining, without you ordering them.
+#
+#   if:
+#     with_facts: [a, b]        which facts the rule reads; the rule is only
+#                               considered once all of them exist
+#     expression: '{{ ... }}'   the test, evaluated over those facts
+#   then:
+#     set_facts: [{c: ...}]     facts to add to working memory
+#     actions: [...]            statements to run when the rule fires
+#
+# Both `with_facts` and `expression` are required. `with_facts` is what makes
+# chaining work: a rule waits until its inputs have been derived.
+#
+# run_mode:
+#   forward   data-driven -- start from what you know, derive everything you can
+#   backward  goal-driven -- start from a goal and work out what would prove it
+#
+# For a fuller treatment see ../rules-engine-demo (loan approval, with actions
+# and an audit trail).
+
+tags: [moco-demo, level-7-engines]
+
+input_data:
+  order_total: 120.0
+  member_years: 3
+  destination: domestic
+  has_hazmat: false
+
+output_name: decision
+
+body:
+  sequence:
+    elements:
+      # --- forward chaining ---------------------------------------------------
+      # Note the chain: is_large_order and is_loyal are derived first, and
+      # qualifies_for_free_shipping reads them. The rules are written in no
+      # particular order -- with_facts sequences them.
+      - rules_engine:
+          name: shipping-rules
+          input_data:
+            run_mode: forward
+            facts:
+              order_total: '{{ order_total }}'
+              member_years: '{{ member_years }}'
+              destination: '{{ destination }}'
+              has_hazmat: '{{ has_hazmat }}'
+          rules:
+            - id: large_order
+              name: Orders over 100 are large
+              if:
+                with_facts: [order_total]
+                expression: '{{ order_total >= 100 }}'
+              then:
+                set_facts:
+                  - is_large_order: true
+
+            - id: loyal_member
+              name: Two years or more is loyal
+              if:
+                with_facts: [member_years]
+                expression: '{{ member_years >= 2 }}'
+              then:
+                set_facts:
+                  - is_loyal: true
+
+            - id: hazmat_surcharge
+              name: Hazardous goods always carry a surcharge
+              if:
+                with_facts: [has_hazmat]
+                expression: '{{ has_hazmat }}'
+              then:
+                set_facts:
+                  - surcharge: 25.0
+
+            # Depends on facts the two rules above derive
+            - id: free_shipping
+              name: Large orders from loyal members ship free, domestically
+              if:
+                with_facts: [is_large_order, is_loyal, destination]
+                expression: '{{ is_large_order and is_loyal and destination == "domestic" }}'
+              then:
+                set_facts:
+                  - qualifies_for_free_shipping: true
+                  - shipping_cost: 0.0
+
+          output_name: derived
+
+      - transform:
+          name: log-derived
+          output_data:
+            - derived#: '{{ derived }}'
+
+      # --- backward chaining --------------------------------------------------
+      # Same shape, but the engine works back from the goal named in
+      # terminate_facts rather than deriving everything it can.
+      - rules_engine:
+          name: goal-query
+          input_data:
+            run_mode: backward
+            terminate_facts:
+              - qualifies_for_free_shipping
+            facts:
+              order_total: '{{ order_total }}'
+              member_years: '{{ member_years }}'
+              destination: '{{ destination }}'
+          rules:
+            - id: large_order
+              if:
+                with_facts: [order_total]
+                expression: '{{ order_total >= 100 }}'
+              then:
+                set_facts:
+                  - is_large_order: true
+
+            - id: loyal_member
+              if:
+                with_facts: [member_years]
+                expression: '{{ member_years >= 2 }}'
+              then:
+                set_facts:
+                  - is_loyal: true
+
+            - id: free_shipping
+              if:
+                with_facts: [is_large_order, is_loyal, destination]
+                expression: '{{ is_large_order and is_loyal and destination == "domestic" }}'
+              then:
+                set_facts:
+                  - qualifies_for_free_shipping: true
+
+          output_name: goal_result
+
+      - transform:
+          name: build-decision
+          input_data:
+            facts: '{{ derived.get("facts", derived) if isinstance(derived, dict) else {} }}'
+          output_data:
+            - decision:
+                free_shipping: '{{ facts.get("qualifies_for_free_shipping", False) }}'
+                shipping_cost: '{{ facts.get("shipping_cost", 9.99) }}'
+                surcharge: '{{ facts.get("surcharge", 0.0) }}'
+                is_large_order: '{{ facts.get("is_large_order", False) }}'
+                is_loyal: '{{ facts.get("is_loyal", False) }}'
+                derived_facts: '{{ sorted(facts.keys()) }}'

@@ -1,0 +1,121 @@
+wfspec_name: state-store-demo
+wfspec_version: 1.0.0
+
+# Persistent state: the `builtin.state.*` activities.
+#
+# Workflow variables die with the run. The state store outlives it, which is how
+# separate runs (or separate workflows) share data -- counters, cursors, cached
+# lookups, last-seen watermarks.
+#
+#   builtin.state.set_state   write a value at (namespace, key)
+#   builtin.state.get_state   read it back; returns None when absent
+#   builtin.state.list_states list the keys in a namespace
+#   builtin.state.del_state   remove a key
+#
+# Keys are scoped by namespace. A namespace is per-user by default; pass
+# in_global_ns: true to share one across users -- deliberately not done here, so
+# running this demo cannot collide with anyone else.
+#
+# REQUIRES A STATE BACKEND. Unlike the rest of this package, this file talks to
+# the server's state store rather than staying in-process. Inspect what it wrote
+# from the CLI:
+#
+#   moco state list --namespace state-store-demo
+#   moco state get --namespace state-store-demo --key run-counter
+#
+# The demo is idempotent and cleans up after itself, except for run-counter,
+# which it deliberately leaves behind to show state surviving between runs --
+# run it twice and watch the count go up.
+
+tags: [moco-demo, level-6-activities, requires-state-store]
+
+context:
+  namespace: state-store-demo
+
+input_data:
+  cursor_value: 2026-08-18T00:00:00Z
+
+output_name: report
+
+body:
+  sequence:
+    elements:
+      # --- read-before-write: absent keys come back as None -----------------
+      - activity:
+          name: read-counter
+          type: builtin.state.get_state
+          input_data:
+            namespace: '{{ namespace }}'
+            key: run-counter
+          output_data:
+            - previous_count: '{{ _raw_output if _raw_output else 0 }}'
+
+      - transform:
+          name: bump-counter
+          output_data:
+            - next_count#: '{{ int(previous_count) + 1 }}'
+
+      # --- write ---------------------------------------------------------------
+      - activity:
+          name: write-counter
+          type: builtin.state.set_state
+          input_data:
+            namespace: '{{ namespace }}'
+            key: run-counter
+            value: '{{ next_count }}'
+
+      # A second key, to make the listing below worth looking at
+      - activity:
+          name: write-cursor
+          type: builtin.state.set_state
+          input_data:
+            namespace: '{{ namespace }}'
+            key: last-cursor
+            value: '{{ cursor_value }}'
+
+      # --- read back -----------------------------------------------------------
+      - activity:
+          name: read-cursor
+          type: builtin.state.get_state
+          input_data:
+            namespace: '{{ namespace }}'
+            key: last-cursor
+          output_name: stored_cursor
+
+      - activity:
+          name: list-keys
+          type: builtin.state.list_states
+          input_data:
+            namespace: '{{ namespace }}'
+          output_name: keys_in_namespace
+
+      # --- clean up the throwaway key -----------------------------------------
+      # run-counter is left in place on purpose; last-cursor is not, so repeated
+      # runs do not accumulate state.
+      - activity:
+          name: delete-cursor
+          type: builtin.state.del_state
+          input_data:
+            namespace: '{{ namespace }}'
+            key: last-cursor
+
+      - activity:
+          name: read-deleted-cursor
+          type: builtin.state.get_state
+          input_data:
+            namespace: '{{ namespace }}'
+            key: last-cursor
+          output_data:
+            - cursor_after_delete: '{{ _raw_output }}'
+
+      - transform:
+          name: build-report
+          output_data:
+            - report:
+                previous_count: '{{ previous_count }}'
+                # higher on every run -- this is the state store doing its job
+                current_count: '{{ next_count }}'
+                stored_cursor: '{{ stored_cursor }}'
+                cursor_after_delete: '{{ cursor_after_delete }}'
+                delete_worked: '{{ cursor_after_delete is None }}'
+                keys_seen: '{{ keys_in_namespace }}'

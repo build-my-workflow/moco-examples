@@ -1,0 +1,37 @@
+wfspec_name: continue-as-new-demo
+wfspec_version: 1.0.0
+
+tags: [moco-demo, level-8-durability, requires-temporal]
+
+context:
+  is_continue_as_new: false
+  step1_done: false
+
+body:
+  sequence:
+    elements:
+      - transform:
+          name: check-continue-as-new
+          condition: '{{step1_done}}'
+          output_data:
+            - is_continue_as_new#: true
+
+      - transform:
+          name: step1
+          condition: '{{not step1_done}}'
+          output_data:
+            - _log#: perform step 1
+            - step1_done: true
+
+
+      - continue_as_new_checkpoint:
+          name: continue_as_new
+          condition: '{{not is_continue_as_new}}'
+          serialize_data_context: true
+          enforce: true # this should only used for test purpose
+
+      - transform:
+          name: complete-demo
+          output_data:
+            - _log#: complete demo
+

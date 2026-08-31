@@ -1,0 +1,82 @@
+wfspec_name: container-scope-variable-demo
+wfspec_version: 1.0.0
+
+tags: [moco-demo, level-2-data-flow]
+
+# Demonstrates the @ (container scope) variable modifier.
+#
+# Variables marked with @ are stored in the nearest enclosing container context
+# (e.g., a sequence or iteration) rather than the global workflow context.
+# This allows reuse of temporary variable names across multiple iterations
+# without polluting the outer scope.
+#
+# Without @: variables set inside a step are global and persist after the step.
+# With @:    variables are scoped to the enclosing container and are not visible
+#            outside it.
+
+output_data: '{{_}}'
+
+body:
+  sequence:
+    elements:
+      # Define a list of orders to process
+      - transform:
+          output_data:
+            - orders:
+                - id: "order-1"
+                  amount: 150.00
+                  customer: "Alice"
+                - id: "order-2"
+                  amount: 49.99
+                  customer: "Bob"
+                - id: "order-3"
+                  amount: 250.00
+                  customer: "Carol"
+
+      # Process each order in sequence.
+      # Inside the iteration body we use @ variables so that 'order', 'discount',
+      # and 'final_price' are scoped to the current iteration's sequence context
+      # and don't leak into the outer workflow scope.
+      - iteration:
+          iter_type: sequence
+          input_data: '{{orders}}'
+          body:
+            sequence:
+              elements:
+                # @ scopes 'order' to this iteration's sequence
+                - transform:
+                    output_data:
+                      - order@: '{{iter_item}}'
+                      - log#: "Processing {{order['id']}} for {{order['customer']}}"
+
+                # @ scopes 'discount' — it would clash between iterations without @
+                - transform:
+                    output_data:
+                      - discount@: '{{0.10 if order["amount"] >= 100 else 0.0}}'
+
+                # @ scopes 'final_price' to this sequence; also logged with #
+                - transform:
+                    output_data:
+                      - final_price@#: '{{round(order["amount"] * (1 - discount), 2)}}'
+
+                # The @ result is passed up as the iteration element output
+                - transform:
+                    output_data:
+                      - order_summary@:
+                          id: '{{order["id"]}}'
+                          customer: '{{order["customer"]}}'
+                          original: '{{order["amount"]}}'
+                          discount_pct: '{{int(discount * 100)}}'
+                          final: '{{final_price}}'
+              output_data: '{{order_summary}}'
+          output_name: processed_orders
+
+      # 'order', 'discount', and 'final_price' are NOT visible here — they were @ scoped.
+      # Only 'processed_orders' (set via output_name on iteration) is available.
+      - transform:
+          output_data:
+            - total_revenue#: '{{sum(o["final"] for o in processed_orders)}}'
+            - summary#:
+                total_orders: '{{len(processed_orders)}}'
+                total_revenue: '{{total_revenue}}'
+                orders: '{{processed_orders}}'

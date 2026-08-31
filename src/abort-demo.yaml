@@ -1,0 +1,106 @@
+wfspec_name: abort-demo
+wfspec_version: 1.0.0
+
+# Demonstrates all five `abort` types. Pick one with the `mode` input:
+#
+#   mode              effect                                     workflow result
+#   ----------------  -----------------------------------------  ---------------
+#   raise             fails with WorkflowRuntimeError, carrying   FAILED
+#                     the structured `error:` payload
+#   abort             fails with AbortError (message only)        FAILED
+#   terminate         stops early, cleanly                        SUCCEEDED, output
+#                                                                 has terminate_message
+#   break             exits the enclosing SEQUENCE                SUCCEEDED
+#   break_iteration   exits the enclosing ITERATION               SUCCEEDED
+#   none              no abort fires                              SUCCEEDED
+#
+# The two loop-control types are easy to mix up. Both are demonstrated in the
+# same loop below, and the `trace` output shows the difference:
+#
+#   break            -> enter-1 after-1 enter-2 enter-3 after-3 post-loop
+#                       (item 2's remaining steps are skipped, the LOOP CONTINUES)
+#   break_iteration  -> enter-1 after-1 enter-2 post-loop
+#                       (the whole LOOP ENDS at item 2)
+#
+# `abort.type` is a literal enum -- it cannot be an expression. So each type gets
+# its own statement, selected by `condition:`.
+
+tags: [moco-demo, level-3-control-flow]
+
+input_data:
+  mode: none
+
+output_name: trace
+
+body:
+  sequence:
+    elements:
+      - transform:
+          name: init-trace
+          output_data:
+            - trace: []
+
+      # --- fail the workflow -------------------------------------------------
+      # `raise` surfaces as WorkflowRuntimeError and carries the `error:` payload.
+      - abort:
+          name: abort-raise
+          condition: '{{ mode == "raise" }}'
+          type: raise
+          message: raised on purpose
+          error:
+            code: DEMO_RAISE
+            detail: the error payload is only available on `raise`
+
+      # `abort` surfaces as AbortError. Message only, no payload.
+      - abort:
+          name: abort-abort
+          condition: '{{ mode == "abort" }}'
+          type: abort
+          message: aborted on purpose
+
+      # --- stop early, but successfully -------------------------------------
+      # `terminate` is not a failure: the workflow succeeds and its output
+      # carries terminate_message. Use it for "nothing to do" exits.
+      - abort:
+          name: abort-terminate
+          condition: '{{ mode == "terminate" }}'
+          type: terminate
+          message: terminated on purpose
+
+      # --- loop control ------------------------------------------------------
+      - iteration:
+          name: loop
+          iter_type: sequence
+          input_data: '{{ [1, 2, 3] }}'
+          body:
+            sequence:
+              elements:
+                - transform:
+                    name: enter-item
+                    output_data:
+                      - _t: '{{ trace.append("enter-" + str(iter_item)) }}'
+
+                # Skips the rest of THIS sequence; item 3 still runs.
+                - abort:
+                    name: abort-break
+                    condition: '{{ iter_item == 2 and mode == "break" }}'
+                    type: break
+                    message: break at item 2
+
+                # Ends the whole loop; item 3 never runs.
+                - abort:
+                    name: abort-break-iteration
+                    condition: '{{ iter_item == 2 and mode == "break_iteration" }}'
+                    type: break_iteration
+                    message: break_iteration at item 2
+
+                - transform:
+                    name: after-item
+                    output_data:
+                      - _t: '{{ trace.append("after-" + str(iter_item)) }}'
+
+      - transform:
+          name: post-loop
+          output_data:
+            - _t: '{{ trace.append("post-loop") }}'
+            - trace#: '{{ trace }}'

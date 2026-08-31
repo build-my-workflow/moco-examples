@@ -1,0 +1,75 @@
+wfspec_name: variable-modifier-demo
+wfspec_version: 1.0.0
+
+tags: [moco-demo, level-2-data-flow]
+
+output_data: '{{_}}'
+
+body:
+  sequence:
+    elements:
+      - transform:
+          output_data:
+            # variable end with # will emit log to moco cli tool
+            - users#:
+                - name: Alice
+                  is_premium: true
+                  shopping_list:
+                    - apples
+                    - oranges
+                - name: Bob
+                  is_premium: false
+                  shopping_list:
+                    - bananas
+                    - grapes
+
+      - iteration:
+          iter_type: parallel
+          join_type: and
+          input_data: '{{users}}'
+          body:
+            sequence:
+              elements:
+                - transform:
+                    output_data:
+                      # variable with @ will be stored in the nearest 'container context',
+                      # which is the sequence context in this case
+                      - user@: '{{iter_item}}'
+                      - start_time@: '{{now()}}'
+
+                - activity:
+                    name: delay-for-user
+                    type: builtin.delay
+                    execute_locally: false
+                    input_data:
+                      duration: '{{1 if user["is_premium"] else 2}}s'
+
+                - transform:
+                    output_data:
+                      # variable with leading _ is local only, only visible in the 'output_data' of the current stepintermediate variables that are only used in the current step
+                      - _end_time: '{{now()}}'
+
+                      - greeting@#: Hello {{user["name"]}}! The current time is {{_end_time}}, the start time is {{start_time}}
+
+                      # jinja variable, the value will be rendered as a jinja template with the current step context as the template context.
+                      - greeting_html@#jinja#: |
+                          <h1>Hello, {{ user["name"] }}!</h1>
+
+                          {% if user["is_premium"] %}
+                            <p>Thank you for being a premium member.</p>
+                          {% else %}
+                            <p>Upgrade today for more features!</p>
+                          {% endif %}
+
+                          <ul>
+                          {% for item in user["shopping_list"] %}
+                            <li>{{ item | capitalize }}</li> {# Using a filter to capitalize text #}
+                          {% endfor %}
+                          </ul>
+              # output_data: '{{greeting_html}}'
+              # output_data:
+              #   - sequence_output: '{{_raw_output}}'
+          output_name: iteration_output
+          # output_data:
+          #   - all_greetings: '{{_raw_output}}'
+            # - all_greetings: '{{[ in _raw_output]}}'

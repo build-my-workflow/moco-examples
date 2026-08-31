@@ -1,0 +1,63 @@
+test_type: integration-test
+
+# REQUIRES A PUBLISHED PACKAGE.
+#
+# The orchestrator resolves children by a dynamic name ('{{ iter_item }}'), and
+# a dynamic name goes to the registry rather than the local package bundle. Until
+# this package is published every case fails with:
+#   WorkflowSpecVersionNotAllowedError: WorkflowSpec version <demo>:1.0.0
+#   doesn't exist or not allowed
+#
+# To run this suite:
+#   moco publish .
+#   # remove the `skip: true` below
+#   moco test tests/moco-examples.test.yaml
+#
+# Left skipped so `moco test tests/` is green from a fresh checkout.
+
+skip: true
+
+wfspec:
+  name: moco-examples
+  version: 1.0.0
+
+test_cases:
+  # A short list keeps the suite quick; the default list is exercised by
+  # `moco run src/moco-examples.yaml`
+  - id: reports-a-row-per-demo
+    input:
+      demos: [transform-demo, sequence-demo]
+    expect:
+      assert:
+        - "{{ __OUTPUT__['total'] == 2 }}"
+        - "{{ len(__OUTPUT__['results']) == 2 }}"
+        - "{{ [r['demo'] for r in __OUTPUT__['results']] == ['transform-demo', 'sequence-demo'] }}"
+
+  - id: all-demos-pass
+    input:
+      demos: [transform-demo, condition-demo, functions-demo]
+    expect:
+      assert:
+        - "{{ __OUTPUT__['all_passed'] == True }}"
+        - "{{ __OUTPUT__['passed'] == 3 }}"
+        - "{{ __OUTPUT__['failed'] == 0 }}"
+        - "{{ __OUTPUT__['failures'] == [] }}"
+
+  # catch_exception means a demo failing at runtime is a failed ROW, not a
+  # failed run. abort-demo in raise mode cannot be driven from here (the
+  # orchestrator passes no input), so this just asserts the shape holds.
+  - id: summary-counts-are-consistent
+    input:
+      demos: [transform-demo]
+    expect:
+      assert:
+        - "{{ __OUTPUT__['passed'] + __OUTPUT__['failed'] == __OUTPUT__['total'] }}"
+        - "{{ __OUTPUT__['all_passed'] == (__OUTPUT__['failed'] == 0) }}"
+
+  - id: empty-list-is-handled
+    input:
+      demos: []
+    expect:
+      assert:
+        - "{{ __OUTPUT__['total'] == 0 }}"
+        - "{{ __OUTPUT__['all_passed'] == True }}"

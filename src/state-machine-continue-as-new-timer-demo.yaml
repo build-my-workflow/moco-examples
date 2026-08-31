@@ -1,0 +1,86 @@
+# Demonstrates checkpoint_policy with timeout_sec.
+#
+# The `wait` state checkpoints on a timer instead of an event count. Compared with wiring this
+# by hand, the state no longer needs a `check_continue_as_new` timer, a transition to handle
+# that timer, an inline continue_as_new_checkpoint statement, or an `is_continue_as_new`
+# sentinel to stop the restart looping — the runtime resumes the machine back in `wait`.
+#
+# Requires the wfspec body to be a single state_machine, which is what lets the runtime record
+# "resume in state X" and mean it.
+wfspec_name: state-machine-continue-as-new-timer-demo
+wfspec_version: 1.0.0
+
+tags: [moco-demo, level-8-durability, requires-temporal]
+context:
+  wait_count: 0
+output_name: final_state
+body:
+  state_machine:
+    initial_state: init
+    output_name: final_state
+    states:
+      - name: init
+        on_enter:
+          sequence:
+            elements:
+              - transform:
+                  output_data:
+                    - _log#: "enter init state"
+
+      - name: wait
+        timers:
+          - name: do_work
+            timeout_sec: 1
+            max_timeout_attempts: null
+        # Checkpoint after a minute in this state. The timer is armed on entry and cancelled
+        # on exit, so it measures time spent here; on resume it is re-armed automatically.
+        checkpoint_policy:
+          timeout_sec: 60
+          enforce: true # only for the demo; in production let Temporal decide
+        on_enter:
+          sequence:
+            elements:
+              - transform:
+                  output_data:
+                    # on_enter does not re-run on resume, so this prints once per real entry.
+                    - _log#: "enter wait state ({{wait_count}})"
+
+      - name: exit
+        is_terminal: true
+        on_enter:
+          sequence:
+            elements:
+              - transform:
+                  output_data:
+                    - _log#: "enter exit state"
+
+    transitions:
+      - from_state: init
+        to_state: wait
+        trigger: null
+
+      - from_state: wait
+        to_state:
+        trigger:
+          event_type: sys.timer.do_work
+          action:
+            sequence:
+              elements:
+                - transform:
+                    output_data:
+                      - wait_count: '{{wait_count + 1}}'
+                      - _log#: "wait timer triggered ({{wait_count}})"
+                - sequence:
+                    condition: '{{wait_count>=1000}}'
+                    elements:
+                      - transform:
+                          output_data:
+                            - _log#: max wait count ({{wait_count}}) reached, emitting exit event
+                      - emit_event:
+                          input_data:
+                            event_type: exit
+
+      - from_state: wait
+        to_state: exit
+        trigger:
+          event_type: exit

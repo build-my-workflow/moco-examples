@@ -1,0 +1,54 @@
+test_type: integration-test
+
+wfspec:
+  name: rules-engine-basics-demo
+  version: 1.0.0
+
+test_cases:
+  # Chaining: large_order and loyal_member fire first, then free_shipping
+  # consumes the facts they derived
+  - id: derived-facts-chain-into-a-conclusion
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['is_large_order'] == True }}"
+        - "{{ __OUTPUT__['is_loyal'] == True }}"
+        - "{{ __OUTPUT__['free_shipping'] == True }}"
+        - "{{ __OUTPUT__['shipping_cost'] == 0.0 }}"
+
+  # Break one link in the chain and the conclusion is not reached
+  - id: small-order-breaks-the-chain
+    input:
+      order_total: 20.0
+    expect:
+      assert:
+        - "{{ __OUTPUT__['is_large_order'] == False }}"
+        - "{{ __OUTPUT__['free_shipping'] == False }}"
+        - "{{ __OUTPUT__['shipping_cost'] == 9.99 }}"
+
+  - id: new-member-breaks-the-chain
+    input:
+      member_years: 1
+    expect:
+      assert:
+        - "{{ __OUTPUT__['is_loyal'] == False }}"
+        - "{{ __OUTPUT__['free_shipping'] == False }}"
+
+  # A rule that reads only its own fact fires independently of the chain
+  - id: hazmat-rule-fires-independently
+    input:
+      has_hazmat: true
+    expect:
+      assert:
+        - "{{ __OUTPUT__['surcharge'] == 25.0 }}"
+        - "{{ __OUTPUT__['free_shipping'] == True }}"
+
+  # The destination guard is part of the final rule's expression
+  - id: international-does-not-get-free-shipping
+    input:
+      destination: international
+    expect:
+      assert:
+        - "{{ __OUTPUT__['is_large_order'] == True }}"
+        - "{{ __OUTPUT__['is_loyal'] == True }}"
+        - "{{ __OUTPUT__['free_shipping'] == False }}"

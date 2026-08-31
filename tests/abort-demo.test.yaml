@@ -1,0 +1,60 @@
+test_type: integration-test
+
+# Exercises every abort type, including the two failure modes -- this is the
+# suite that proves expect.error and expect.terminate actually work.
+
+wfspec:
+  name: abort-demo
+  version: 1.0.0
+
+test_cases:
+  - id: no-abort-runs-everything
+    input:
+      mode: none
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == ['enter-1', 'after-1', 'enter-2', 'after-2', 'enter-3', 'after-3', 'post-loop'] }}"
+
+  # break exits the enclosing SEQUENCE -- item 2 is cut short, item 3 still runs
+  - id: break-skips-rest-of-item-but-loop-continues
+    input:
+      mode: break
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == ['enter-1', 'after-1', 'enter-2', 'enter-3', 'after-3', 'post-loop'] }}"
+        - "{{ 'after-2' not in __OUTPUT__ }}"
+        - "{{ 'enter-3' in __OUTPUT__ }}"
+
+  # break_iteration exits the whole LOOP -- item 3 never runs
+  - id: break-iteration-ends-the-loop
+    input:
+      mode: break_iteration
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == ['enter-2', 'post-loop'] or __OUTPUT__ == ['enter-1', 'after-1', 'enter-2', 'post-loop'] }}"
+        - "{{ 'enter-3' not in __OUTPUT__ }}"
+        - "{{ 'post-loop' in __OUTPUT__ }}"
+
+  # terminate is a SUCCESS with a terminate_message, not a failure
+  - id: terminate-stops-cleanly
+    input:
+      mode: terminate
+    expect:
+      terminate:
+        terminate_message: terminated on purpose
+
+  # raise fails the workflow with WorkflowRuntimeError
+  - id: raise-fails-the-workflow
+    input:
+      mode: raise
+    expect:
+      error:
+        error_type: WorkflowRuntimeError
+
+  # abort fails the workflow with AbortError
+  - id: abort-fails-the-workflow
+    input:
+      mode: abort
+    expect:
+      error:
+        error_type: AbortError

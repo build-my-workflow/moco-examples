@@ -1,0 +1,44 @@
+test_type: integration-test
+
+# checkpoint_policy with auto_resume: false — the machine restarts at `init`
+# rather than resuming into the state the checkpoint fired in, so the async
+# subscriber `init` starts is live again in every execution.
+#
+# The sibling demo (state-machine-continue-as-new-demo) is the default case,
+# where the machine does resume back into the checkpointed state.
+#
+# SLOW: the monitoring state ticks a 1s timer, so a case takes roughly
+# max_ticks seconds. max_ticks is lowered below to keep the suite quick.
+
+wfspec:
+  name: state-machine-continue-as-new-no-resume-demo
+  version: 1.0.0
+
+test_cases:
+  # Fewer events than the checkpoint threshold: nothing checkpoints, and the
+  # machine walks init -> warmup -> monitoring -> done as normal.
+  - id: terminates-without-reaching-the-checkpoint
+    input:
+      max_ticks: 2
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'done' }}"
+
+  # Enough events for at least one checkpoint. The machine restarts at `init`,
+  # re-starts its subscriber, routes past `warmup` on checkpointed_from_state,
+  # and still reaches the terminal state.
+  - id: reaches-terminal-state-across-checkpoints
+    input:
+      max_ticks: 5
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'done' }}"
+
+  # Several checkpoints in a row: init re-runs each time without the restart
+  # loop stalling or the machine losing its way back to monitoring.
+  - id: survives-multiple-checkpoints
+    input:
+      max_ticks: 9
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'done' }}"

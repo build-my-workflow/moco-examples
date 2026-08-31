@@ -1,0 +1,169 @@
+# yaml-language-server: $schema=../../.claude/skills/building-moco-workflow/workflowspec_schema.json
+# ================================================================================
+# CHECKPOINT_POLICY WITH auto_resume: false — re-running an init state on restart
+# ================================================================================
+#
+# PURPOSE:
+#   By default a state's `checkpoint_policy` records where it fired, and the next
+#   execution jumps straight back into that state with `on_enter` skipped. That is
+#   wrong when an earlier state has a side effect the new execution needs again.
+#
+#   The classic case is here: `init` starts a long-running `async_mode` activity
+#   that feeds the machine. Async activity handles do not survive continue-as-new,
+#   so if the restart resumed directly into `monitoring`, the machine would sit
+#   there with no event producer and never hear from it again.
+#
+#   `auto_resume: false` restarts the machine at `initial_state` with `on_enter`
+#   running normally, so the subscriber is live again in every execution.
+#
+# HOW IT WORKS:
+#   - `monitoring` declares `checkpoint_policy: {event_count: 3, auto_resume: false}`.
+#   - The record is still written, so the state name the checkpoint fired in stays
+#     readable as `__sys_info__["state_machine"]["checkpointed_from_state"]`. `init`
+#     uses it to route straight back to `monitoring` and skip the one-time `warmup`.
+#   - `resumed_from_state` stays null, because nothing was resumed.
+#   - The `tick` timer drives progress on its own, so the demo also completes on the
+#     in-memory runtime, where the checkpoint is a no-op.
+#
+# CONTRAST:
+#   src/state-machine-continue-as-new-demo.yaml and
+#   src/state-machine-continue-as-new-timer-demo.yaml both use the default
+#   (auto_resume: true) and resume back into the checkpointed state.
+#
+# RUN:
+#   moco run src/state-machine-continue-as-new-no-resume-demo.yaml --debug
+#   moco run src/state-machine-continue-as-new-no-resume-demo.yaml -i '{"max_ticks": 4}'
+# ================================================================================
+
+wfspec_name: state-machine-continue-as-new-no-resume-demo
+wfspec_version: 1.0.0
+
+tags: [moco-demo, level-8-durability, requires-temporal]
+
+input_data:
+  # How many ticks to handle before finishing. Parameterised so a test can run
+  # a short cycle without editing this file.
+  max_ticks: 9
+
+context:
+  ticks: 0
+  inits: 0
+  warmups: 0
+  subscriber_events: 0
+
+output_name: final_state
+
+body:
+  state_machine:
+    name: no_resume_machine
+    event_source_topic: monitor_events
+    initial_state: init
+    output_name: final_state
+
+    states:
+      # Runs again in every execution, which is the whole point of auto_resume: false.
+      # builtin.delay stands in for a real subscriber (kafka.consume, rabbit.receive,
+      # websocket.connect, ...) — a long-running activity that publishes to the
+      # machine's event_source_topic.
+      - name: init
+        on_enter:
+          sequence:
+            elements:
+              - transform:
+                  output_data:
+                    - inits: '{{ inits + 1 }}'
+                    - _log#: >-
+                        enter init (execution #{{ inits }}),
+                        resumed_from={{ __sys_info__.get("state_machine", {}).get("resumed_from_state") }},
+                        checkpointed_from={{ __sys_info__.get("state_machine", {}).get("checkpointed_from_state") }}
+
+              - activity:
+                  name: subscriber
+                  type: builtin.delay
+                  async_mode: true
+                  async_event_topic: monitor_events # == event_source_topic
+                  output_name: subscriber_token
+                  input_data:
+                    duration: 2
+
+      # One-time setup that must NOT run again after a restart. `init` routes past it
+      # using checkpointed_from_state.
+      - name: warmup
+        on_enter:
+          transform:
+            output_data:
+              - warmups: '{{ warmups + 1 }}'
+              - _log#: "enter warmup ({{ warmups }}) — fresh start only"
+
+      - name: monitoring
+        timers:
+          - name: tick
+            timeout_sec: 1
+            max_timeout_attempts: null
+        # Checkpoint every 3 events handled while staying in this state. auto_resume
+        # is off, so the next execution restarts at `init` instead of landing here
+        # with a dead subscriber.
+        checkpoint_policy:
+          event_count: 3
+          auto_resume: false
+          enforce: true # only for the demo; in production let Temporal decide
+        on_enter:
+          transform:
+            output_data:
+              - _log#: "enter monitoring (ticks so far: {{ ticks }})"
+
+      - name: done
+        is_terminal: true
+        on_enter:
+          transform:
+            output_data:
+              - _log#: >-
+                  done after {{ ticks }} ticks,
+                  {{ inits }} execution(s), {{ warmups }} warmup(s),
+                  {{ subscriber_events }} subscriber event(s)
+
+    transitions:
+      # Evaluated before the fallback below — the first satisfied automatic
+      # transition wins, so this must come first.
+      - from_state: init
+        to_state: monitoring
+        trigger:
+          condition: '{{ __sys_info__.get("state_machine", {}).get("checkpointed_from_state") == "monitoring" }}'
+
+      - from_state: init
+        to_state: warmup
+        trigger: null
+
+      - from_state: warmup
+        to_state: monitoring
+        trigger: null
+
+      - from_state: monitoring
+        to_state:
+        trigger:
+          event_type: sys.timer.tick
+          condition: '{{ ticks < max_ticks }}'
+          action:
+            transform:
+              output_data:
+                - ticks: '{{ ticks + 1 }}'
+                - _log#: "tick {{ ticks }}/{{ max_ticks }}"
+
+      # Proof the subscriber started by THIS execution is alive: its completion is
+      # published to monitor_events and handled here. The token is unique per
+      # invocation, so it is referenced as an expression rather than written out.
+      - from_state: monitoring
+        to_state:
+        trigger:
+          event_type: '{{ subscriber_token }}'
+          action:
+            transform:
+              output_data:
+                - subscriber_events: '{{ subscriber_events + 1 }}'
+                - _log#: "subscriber event #{{ subscriber_events }} (execution #{{ inits }})"
+
+      - from_state: monitoring
+        to_state: done
+        trigger:
+          event_type: sys.timer.tick
+          condition: '{{ ticks >= max_ticks }}'

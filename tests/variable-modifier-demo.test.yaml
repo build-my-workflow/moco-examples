@@ -1,0 +1,37 @@
+test_type: integration-test
+
+wfspec:
+  name: variable-modifier-demo
+  version: 1.0.0
+
+test_cases:
+  # Happy path: both users processed in parallel, greetings generated
+  - id: processes-all-users
+    input: {}
+    mocks:
+      - step_name: delay-for-user
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ iteration_output is not None }}"
+        - "{{ len(iteration_output) == 2 }}"
+
+  # Verify premium user greeting is generated (Alice)
+  - id: premium-user-greeting
+    input: {}
+    mocks:
+      - step_name: delay-for-user
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ any('Alice' in str(item) for item in iteration_output) }}"
+
+  # Verify non-premium user greeting is generated (Bob)
+  - id: non-premium-user-greeting
+    input: {}
+    mocks:
+      - step_name: delay-for-user
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ any('Bob' in str(item) for item in iteration_output) }}"

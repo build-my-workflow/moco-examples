@@ -1,0 +1,48 @@
+test_type: integration-test
+
+wfspec:
+  name: state-machine-basics-demo
+  version: 1.0.0
+
+test_cases:
+  # The workflow's output_name is final_state, so the result is the bare state
+  # name -- assert against __OUTPUT__, not a key.
+  - id: high-score-is-approved
+    input:
+      quality_score: 80
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'approved' }}"
+
+  - id: low-score-is-rejected
+    input:
+      quality_score: 50
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'rejected' }}"
+
+  # The guards are >= and <, so the threshold itself approves
+  - id: score-exactly-at-threshold-is-approved
+    input:
+      quality_score: 70
+      approval_threshold: 70
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'approved' }}"
+
+  - id: score-just-below-threshold-is-rejected
+    input:
+      quality_score: 69
+      approval_threshold: 70
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'rejected' }}"
+
+  # Raising the bar flips a previously-approved score
+  - id: threshold-is-configurable
+    input:
+      quality_score: 80
+      approval_threshold: 95
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == 'rejected' }}"

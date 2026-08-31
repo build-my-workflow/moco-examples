@@ -1,0 +1,34 @@
+test_type: integration-test
+
+# continue_as_new_checkpoint restarts the workflow with a fresh history, carrying
+# the data context across when serialize_data_context is true. The demo uses
+# enforce: true so the checkpoint always fires; in production you leave that off
+# and let Temporal decide when history is large enough to warrant it.
+#
+# What is verified here is that the workflow survives the restart and completes.
+# The spec declares no output_name/output_data, so the result is an empty dict --
+# there is nothing to assert on beyond successful completion, which is exactly
+# what an unmet `expect` block would have caught before the runner was fixed.
+
+wfspec:
+  name: continue-as-new-demo
+  version: 1.0.0
+
+test_cases:
+  # Completing at all is the assertion: the sentinel (is_continue_as_new) has to
+  # stop the restart looping, or this never terminates.
+  - id: survives-the-checkpoint-and-completes
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__ is not None }}"
+        - "{{ __OUTPUT__ == {} }}"
+
+  # step1_done is carried across the restart. Starting with it already true
+  # short-circuits step 1, and the run must still complete cleanly.
+  - id: resumes-with-context-carried-across
+    input:
+      step1_done: true
+    expect:
+      assert:
+        - "{{ __OUTPUT__ == {} }}"

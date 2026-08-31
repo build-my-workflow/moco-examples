@@ -1,0 +1,14 @@
+wfspec_name: transform-demo
+wfspec_version: 1.0.0
+
+tags: [moco-demo, level-1-basics]
+
+output_name: greeting
+
+body:
+  transform:
+    input_data:
+      user_id: '{{__user_info__.get("user_id")}}'
+    output_data:
+      - current_time: '{{now()}}'
+      - greeting: Hello {{user_id}}, the current time is {{current_time}}

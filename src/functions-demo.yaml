@@ -1,0 +1,78 @@
+wfspec_name: functions-demo
+wfspec_version: 1.0.0
+
+# Demonstrates reusable `functions` and the `call` statement.
+#
+# A function is a subset of a wfspec (input_data / output_data / body) declared
+# under the top-level `functions:` list and executed as an inline child workflow.
+# `call` invokes it, mapping arguments in via input_data and the return value out
+# via output_name / output_data.
+#
+# Because each call runs in a fresh context, a function cannot accidentally read
+# or clobber the caller's variables -- only what is passed in is visible.
+# Functions can call sibling functions defined in the same wfspec.
+
+tags: [moco-demo, level-4-composition]
+
+input_data:
+  x: 5
+  y: 3
+
+output_name: summary
+
+functions:
+  # A simple function: add two numbers.
+  - function: add
+    input_data:
+      a:
+      b:
+    output_data:
+      sum: "{{ a + b }}"
+    body:
+      transform: {}
+
+  # A function that calls a sibling function (`add`) and squares the result.
+  - function: add_then_square
+    input_data:
+      a:
+      b:
+    output_data:
+      value: "{{ squared }}"
+    body:
+      sequence:
+        elements:
+          - call:
+              function: add
+              input_data:
+                a: "{{ a }}"
+                b: "{{ b }}"
+              output_name: added
+          - transform:
+              output_data:
+                - squared: "{{ added['sum'] ** 2 }}"
+
+body:
+  sequence:
+    elements:
+      # Call `add` directly.
+      - call:
+          function: add
+          input_data:
+            a: "{{ x }}"
+            b: "{{ y }}"
+          output_name: add_result
+
+      # Call a function that composes another function.
+      - call:
+          function: add_then_square
+          input_data:
+            a: "{{ x }}"
+            b: "{{ y }}"
+          output_name: square_result
+
+      # Assemble the final workflow output.
+      - transform:
+          output_data:
+            - summary:
+                sum: "{{ add_result['sum'] }}"
+                sum_squared: "{{ square_result['value'] }}"

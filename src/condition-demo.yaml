@@ -1,0 +1,117 @@
+wfspec_name: condition-demo
+wfspec_version: 1.0.0
+
+# Demonstrates `condition:` -- the guard available on every statement type.
+#
+# Two syntaxes:
+#   string    condition: '{{ age >= 18 }}'
+#   structured  condition: {and: [...]}, {or: [...]}, {not: ...}
+# The structured forms nest freely and short-circuit.
+#
+# A statement whose condition is false is skipped entirely: it does not run and
+# writes no output. There is no `else`, so an if/elif/else chain is expressed as
+# sibling statements with mutually exclusive conditions.
+
+tags: [moco-demo, level-3-control-flow]
+
+input_data:
+  age: 30
+  country: US
+  is_member: true
+  is_banned: false
+
+output_name: summary
+
+body:
+  sequence:
+    elements:
+      # --- 1. string condition on a primitive statement ---------------------
+      - transform:
+          name: flag-adult
+          condition: '{{ age >= 18 }}'
+          output_data:
+            - is_adult#: true
+
+      # --- 2. if / elif / else, as mutually exclusive siblings --------------
+      - transform:
+          name: band-minor
+          condition: '{{ age < 18 }}'
+          output_data:
+            - band: minor
+      - transform:
+          name: band-adult
+          condition: '{{ 18 <= age < 65 }}'
+          output_data:
+            - band: adult
+      - transform:
+          name: band-senior
+          condition: '{{ age >= 65 }}'
+          output_data:
+            - band: senior
+
+      # --- 3. condition on a composite: the whole block is skipped ----------
+      - sequence:
+          name: member-benefits
+          condition: '{{ is_member }}'
+          elements:
+            - transform:
+                name: set-discount
+                output_data:
+                  - discount#: 0.15
+            - transform:
+                name: set-perks
+                output_data:
+                  - perks: [priority-support, free-shipping]
+
+      # Non-members never reach the block above, so seed the defaults here.
+      - transform:
+          name: non-member-defaults
+          condition: '{{ not is_member }}'
+          output_data:
+            - discount: 0.0
+            - perks: []
+
+      # --- 4. structured conditions -----------------------------------------
+      # and: every sub-condition must hold
+      - transform:
+          name: domestic-adult-member
+          condition:
+            and:
+              - '{{ age >= 18 }}'
+              - '{{ country == "US" }}'
+              - '{{ is_member }}'
+          output_data:
+            - tier#: domestic-premium
+
+      # or: any sub-condition
+      - transform:
+          name: needs-review
+          condition:
+            or:
+              - '{{ age < 18 }}'
+              - '{{ country not in ["US", "CA"] }}'
+          output_data:
+            - needs_review#: true
+
+      # not: negation -- and sub-conditions nest, so this reads
+      # "not (banned or under-13)"
+      - transform:
+          name: eligible
+          condition:
+            not:
+              or:
+                - '{{ is_banned }}'
+                - '{{ age < 13 }}'
+          output_data:
+            - eligible#: true
+
+      - transform:
+          name: build-summary
+          output_data:
+            - summary:
+                band: '{{ band }}'
+                discount: '{{ discount }}'
+                perks: '{{ perks }}'
+                tier: '{{ tier if "tier" in _ else "standard" }}'
+                eligible: '{{ eligible if "eligible" in _ else False }}'
+                needs_review: '{{ needs_review if "needs_review" in _ else False }}'

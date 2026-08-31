@@ -1,0 +1,68 @@
+test_type: integration-test
+
+wfspec:
+  name: condition-demo
+  version: 1.0.0
+
+test_cases:
+  # Defaults: 30, US, member, not banned
+  - id: adult-domestic-member
+    input: {}
+    expect:
+      assert:
+        - "{{ __OUTPUT__['band'] == 'adult' }}"
+        - "{{ __OUTPUT__['discount'] == 0.15 }}"
+        - "{{ __OUTPUT__['tier'] == 'domestic-premium' }}"
+        - "{{ __OUTPUT__['eligible'] == True }}"
+        - "{{ __OUTPUT__['needs_review'] == False }}"
+
+  # The member-benefits sequence is skipped wholesale; defaults apply instead
+  - id: non-member-skips-the-block
+    input:
+      is_member: false
+    expect:
+      assert:
+        - "{{ __OUTPUT__['discount'] == 0.0 }}"
+        - "{{ __OUTPUT__['perks'] == [] }}"
+        - "{{ __OUTPUT__['tier'] == 'standard' }}"
+
+  # Under 18 picks a different band and trips the `or` review condition
+  - id: minor-needs-review
+    input:
+      age: 15
+    expect:
+      assert:
+        - "{{ __OUTPUT__['band'] == 'minor' }}"
+        - "{{ __OUTPUT__['needs_review'] == True }}"
+        - "{{ __OUTPUT__['tier'] == 'standard' }}"
+
+  - id: senior-band
+    input:
+      age: 70
+    expect:
+      assert:
+        - "{{ __OUTPUT__['band'] == 'senior' }}"
+
+  # Non-US trips `or`, and fails the `and` for domestic-premium
+  - id: foreign-member
+    input:
+      country: FR
+    expect:
+      assert:
+        - "{{ __OUTPUT__['needs_review'] == True }}"
+        - "{{ __OUTPUT__['tier'] == 'standard' }}"
+
+  # not(banned or under-13)
+  - id: banned-is-not-eligible
+    input:
+      is_banned: true
+    expect:
+      assert:
+        - "{{ __OUTPUT__['eligible'] == False }}"
+
+  - id: under-13-is-not-eligible
+    input:
+      age: 10
+    expect:
+      assert:
+        - "{{ __OUTPUT__['eligible'] == False }}"

@@ -1,0 +1,126 @@
+wfspec_name: iteration-demo
+wfspec_version: 1.0.0
+
+# Demonstrates the `iteration` statement on its own.
+# (container-scope-variable-demo and variable-modifier-demo use iteration too,
+#  but to teach variable scoping; this file is about the loop itself.)
+#
+#   iter_type: sequence  -- one item at a time, in order
+#   iter_type: parallel  -- all items concurrently
+#   join_type: and       -- every item must succeed (the default); collects a list
+#   join_type: or        -- at least one item must succeed, failures tolerated
+#
+# join_type is about SUCCESS, not speed. Neither value exits early: every item
+# is waited for either way.
+#
+# Inside the body:
+#   iter_item   the current item
+#   iter_items  the stack of items, outermost first -- iter_items[-1] == iter_item.
+#               In a nested loop iter_items[0] is the outer item.
+#
+# Collecting results:
+#   output_name on the iteration binds the list of per-item results
+#   output_data on the iteration body element projects what each item contributes
+
+tags: [moco-demo, level-3-control-flow]
+
+input_data:
+  orders:
+    - {id: A, units: 2, price: 10.0}
+    - {id: B, units: 1, price: 40.0}
+    - {id: C, units: 5, price: 3.0}
+
+output_name: report
+
+body:
+  sequence:
+    elements:
+      # --- sequential: order is guaranteed --------------------------------
+      - iteration:
+          name: price-each-order
+          iter_type: sequence
+          input_data: '{{ orders }}'
+          body:
+            sequence:
+              elements:
+                - transform:
+                    name: price-one
+                    output_data:
+                      - line@:
+                          id: '{{ iter_item["id"] }}'
+                          amount: '{{ round(iter_item["units"] * iter_item["price"], 2) }}'
+              # what this item contributes to the collected list
+              output_data: '{{ line }}'
+          output_name: priced_lines
+
+      - transform:
+          name: log-priced
+          output_data:
+            - priced_lines#: '{{ priced_lines }}'
+
+      # --- parallel + join_type: and -> every item completes ----------------
+      # The delays are deliberately uneven; `and` still waits for all three.
+      - iteration:
+          name: check-each-order
+          iter_type: parallel
+          join_type: and
+          input_data: '{{ orders }}'
+          body:
+            sequence:
+              elements:
+                - activity:
+                    name: simulate-lookup
+                    type: builtin.delay
+                    input_data:
+                      duration: '{{ iter_item["units"] }}s'
+                - transform:
+                    name: verdict
+                    output_data:
+                      - verdict@: '{{ iter_item["id"] }}:ok'
+              output_data: '{{ verdict }}'
+          output_name: checks
+
+      - transform:
+          name: log-checks
+          output_data:
+            - checks#: '{{ checks }}'
+
+      # --- join_type: or is deliberately NOT demonstrated here ---------------
+      # `or` means "at least one item must succeed" -- failing items are
+      # tolerated, and the statement yields a single result instead of the list.
+      # It is not an early exit: every item is still waited for.
+      #
+      # It is left out of this demo because the two runtimes disagree. On
+      # Temporal a surviving item's value is returned; on the in-memory runtime
+      # the result comes back as None. Until that converges, prefer `and` plus
+      # explicit per-item error handling, which behaves the same everywhere.
+
+      # --- nested iteration: iter_items carries the whole stack -------------
+      - iteration:
+          name: outer-loop
+          iter_type: sequence
+          input_data: '{{ ["x", "y"] }}'
+          body:
+            iteration:
+              name: inner-loop
+              iter_type: sequence
+              input_data: '{{ [1, 2] }}'
+              body:
+                sequence:
+                  elements:
+                    - transform:
+                        name: pair
+                        output_data:
+                          # iter_items[0] is the outer item, iter_item the inner one
+                          - pair@: '{{ iter_items[0] }}{{ iter_item }}'
+                  output_data: '{{ pair }}'
+          output_name: grid
+
+      - transform:
+          name: build-report
+          output_data:
+            - report:
+                priced_lines: '{{ priced_lines }}'
+                order_total: '{{ round(sum(l["amount"] for l in priced_lines), 2) }}'
+                checks: '{{ checks }}'
+                grid: '{{ grid }}'

@@ -1,0 +1,19 @@
+test_type: integration-test
+
+wfspec:
+  name: sequence-demo
+  version: 1.0.0
+
+test_cases:
+  # Happy path: steps run in order, greeting captures the start_time
+  - id: greeting-includes-start-time
+    input: {}
+    mocks:
+      - step_name: delay-step
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ __OUTPUT__ is not None }}"
+        - "{{ 'Hello' in __OUTPUT__ }}"
+        - "{{ 'received at' in __OUTPUT__ }}"
+        - "{{ 'Current time is' in __OUTPUT__ }}"

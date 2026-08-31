@@ -1,0 +1,111 @@
+test_type: integration-test
+
+# The HTTP steps are off by default (offline: true), so this suite is hermetic.
+# The networked cases below mock http.request by step name rather than calling
+# out, which keeps `moco test` deterministic and offline-safe.
+#
+# Note what a green run here does and does not prove: retry_policy and
+# cache_policy are honoured only by the Temporal runtime, so these cases verify
+# the spec and its data flow, not the retry or caching behaviour itself.
+
+wfspec:
+  name: activity-options-demo
+  version: 1.0.0
+
+test_cases:
+  - id: offline-by-default-skips-networked-steps
+    input: {}
+    mocks:
+      - step_name: local-delay
+        _raw_output: null
+    expect:
+      assert:
+        - "{{ __OUTPUT__['offline'] == True }}"
+        - "{{ __OUTPUT__['started_at'] is not None }}"
+        - "{{ __OUTPUT__['fetched_args'] is None }}"
+        - "{{ __OUTPUT__['cache_hit'] is None }}"
+
+  # With the network path enabled but mocked, the retry step's output_data
+  # projection runs
+  - id: retry-step-projects-its-response
+    input:
+      offline: false
+    mocks:
+      - step_name: local-delay
+        _raw_output: null
+      - step_name: fetch-with-retry
+        _raw_output:
+          json:
+            args:
+              demo: retry
+      - step_name: cached-fetch-first
+        _raw_output:
+          json:
+            uuid: uuid-aaa
+      - step_name: cached-fetch-second
+        _raw_output:
+          json:
+            uuid: uuid-aaa
+      - step_name: uncached-fetch
+        _raw_output:
+          json:
+            uuid: uuid-bbb
+    expect:
+      assert:
+        - "{{ __OUTPUT__['fetched_args'] == {'demo': 'retry'} }}"
+
+  # Two identical cached calls returning the same value -> cache_hit true;
+  # the uncached call returns a different one -> uncached_differs true
+  - id: cache-comparison-is-wired-correctly
+    input:
+      offline: false
+    mocks:
+      - step_name: local-delay
+        _raw_output: null
+      - step_name: fetch-with-retry
+        _raw_output:
+          json:
+            args: {}
+      - step_name: cached-fetch-first
+        _raw_output:
+          json:
+            uuid: uuid-aaa
+      - step_name: cached-fetch-second
+        _raw_output:
+          json:
+            uuid: uuid-aaa
+      - step_name: uncached-fetch
+        _raw_output:
+          json:
+            uuid: uuid-bbb
+    expect:
+      assert:
+        - "{{ __OUTPUT__['cache_hit'] == True }}"
+        - "{{ __OUTPUT__['uncached_differs'] == True }}"
+
+  # A cache miss shows up as cache_hit false
+  - id: differing-values-are-not-a-cache-hit
+    input:
+      offline: false
+    mocks:
+      - step_name: local-delay
+        _raw_output: null
+      - step_name: fetch-with-retry
+        _raw_output:
+          json:
+            args: {}
+      - step_name: cached-fetch-first
+        _raw_output:
+          json:
+            uuid: uuid-aaa
+      - step_name: cached-fetch-second
+        _raw_output:
+          json:
+            uuid: uuid-zzz
+      - step_name: uncached-fetch
+        _raw_output:
+          json:
+            uuid: uuid-bbb
+    expect:
+      assert:
+        - "{{ __OUTPUT__['cache_hit'] == False }}"
